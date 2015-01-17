@@ -245,7 +245,10 @@ int isGreater(int x, int y) {
  */
 int isPower2(int x) {
   int minusOne = ~0;
-  return x && !(x & (x+minusOne));
+  /* !=0 and >= 0 */
+  int isPositive = x && !(x>>31);
+  /* x>0 then ... */
+  return isPositive && !(x & (x+minusOne));
 }
 /* 
  * fitsBits - return 1 if x can be represented as an 
