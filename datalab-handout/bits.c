@@ -1,7 +1,7 @@
 /* 
  * CS:APP Data Lab 
  * 
- * <Please put your name and userid here>
+ * Wei Li (weili1)
  * 
  * bits.c - Source file with your solutions to the Lab.
  *          This is the file you will hand in to your instructor.
@@ -139,7 +139,8 @@ NOTES:
  *   Rating: 1
  */
 int bitAnd(int x, int y) {
-  return 2;
+  /* De Morgan's laws */
+  return ~((~x)|(~y));
 }
 
 /* 
@@ -149,11 +150,7 @@ int bitAnd(int x, int y) {
  *   Rating: 1
  */
 int tmin(void) {
-
-
-
-  return 2;
-
+  return (~0)<<31;
 }
 /* 
  * negate - return -x 
@@ -163,7 +160,7 @@ int tmin(void) {
  *   Rating: 2
  */
 int negate(int x) {
-  return 2;
+  return (~x) + 1;
 }
 /* 
  * allEvenBits - return 1 if all even-numbered bits in word set to 1
@@ -173,7 +170,7 @@ int negate(int x) {
  *   Rating: 2
  */
 int allEvenBits(int x) {
-  return 2;
+  return (-1431655766 | x) + 2;
 }
 /*
  * bitCount - returns count of number of 1's in word
@@ -183,7 +180,17 @@ int allEvenBits(int x) {
  *   Rating: 4
  */
 int bitCount(int x) {
-  return 2;
+  unsigned int m1 = 0x55555555;
+  unsigned int m2 = 0x33333333;
+  unsigned int m4 = 0x0f0f0f0f;
+  unsigned int m8 = 0x00FF00FF;
+  unsigned int m16 = 0x0000FFFF;
+  x = (x & m1) + ((x>>1) & m1);
+  x = (x & m2) + ((x>>2) & m2);
+  x = (x & m4) + ((x>>4) & m4);
+  x = (x & m8) + ((x>>8) & m8);
+  x = (x & m16) + ((x>>16) & m16);
+  return x;
 }
 /* 
  * logicalShift - shift x to the right by n, using a logical shift
