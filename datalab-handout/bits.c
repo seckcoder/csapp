@@ -170,7 +170,9 @@ int negate(int x) {
  *   Rating: 2
  */
 int allEvenBits(int x) {
-  return (0x55555555 | x) + 2;
+  int mask = 0xaa | (0xaa << 8);
+  mask = mask | (mask << 16);
+  return !((mask | x) + 1);
 }
 /*
  * bitCount - returns count of number of 1's in word
@@ -203,10 +205,12 @@ int bitCount(int x) {
  *   Rating: 3 
  */
 int logicalShift(int x, int n) {
-  int t,t1;
-  t = (~n)+31;
+  int mask,t1,shift_num,sign;
+  sign = (~(!!n)) + 1;
+  shift_num = ((~n)+33);
   t1 = x >> n;
-  return ((t1 >> t) << t) ^ t1;
+  mask = ((t1>>shift_num)<<shift_num) & sign;
+  return mask ^ t1;
 }
 /* 
  * isNegative - return 1 if x < 0, return 0 otherwise 
