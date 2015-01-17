@@ -245,10 +245,14 @@ int isGreater(int x, int y) {
  */
 int isPower2(int x) {
   int minusOne = ~0;
-  /* !=0 and >= 0 */
-  int isPositive = x && !(x>>31);
-  /* x>0 then ... */
-  return isPositive && !(x & (x+minusOne));
+  int isNeg = x >> 31; /* -1 if is neg, 0 if >=0 */
+  int isZero = !x; /* 1 if is zero, 0 otherwise */
+  int v = x & (x+minusOne);  /* 0 if power of 2. */
+  /* neg: -1, 0, 1;
+   * pos-p2: 0, 0, 0;
+   * pos-not-p2: 0, 0, 1;
+   * zero: 0, 1, 0*/
+  return !(isNeg | isZero | v);
 }
 /* 
  * fitsBits - return 1 if x can be represented as an 
