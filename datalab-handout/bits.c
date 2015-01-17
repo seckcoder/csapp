@@ -220,7 +220,7 @@ int logicalShift(int x, int n) {
  *   Rating: 2
  */
 int isNegative(int x) {
-  return 2;
+  return !!(x>>31);
 }
 /* 
  * isGreater - if x > y  then return 1, else return 0 
@@ -230,7 +230,10 @@ int isNegative(int x) {
  *   Rating: 3
  */
 int isGreater(int x, int y) {
-  return 2;
+  /* x>=y+1 => x+(-(y+1)) >= 0 */
+  y = (~(y+1))+1;
+  x=x+y;
+  return !!(x>>31);
 }
 /*
  * isPower2 - returns 1 if x is a power of 2, and 0 otherwise
@@ -241,7 +244,8 @@ int isGreater(int x, int y) {
  *   Rating: 4
  */
 int isPower2(int x) {
-  return 2;
+  int minusOne = ~0;
+  return x && !(x & (x+minusOne));
 }
 /* 
  * fitsBits - return 1 if x can be represented as an 
