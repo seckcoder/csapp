@@ -170,7 +170,7 @@ int negate(int x) {
  *   Rating: 2
  */
 int allEvenBits(int x) {
-  return (-1431655766 | x) + 2;
+  return (0x55555555 | x) + 2;
 }
 /*
  * bitCount - returns count of number of 1's in word
@@ -180,17 +180,19 @@ int allEvenBits(int x) {
  *   Rating: 4
  */
 int bitCount(int x) {
-  unsigned int m1 = 0x55555555;
-  unsigned int m2 = 0x33333333;
-  unsigned int m4 = 0x0f0f0f0f;
-  unsigned int m8 = 0x00FF00FF;
-  unsigned int m16 = 0x0000FFFF;
+  int m1,m2,m4;
+  m1 = 0x55 | (0x55 << 8);
+  m1 = m1 | (m1 << 16);
+  m2 = 0x33 | (0x33 << 8);
+  m2 = m2 | (m2 << 16);
+  m4 = 0x0f | (0x0f << 8);
+  m4 = m4 | (m4 << 16);
   x = (x & m1) + ((x>>1) & m1);
   x = (x & m2) + ((x>>2) & m2);
-  x = (x & m4) + ((x>>4) & m4);
-  x = (x & m8) + ((x>>8) & m8);
-  x = (x & m16) + ((x>>16) & m16);
-  return x;
+  x = (x+(x>>4)) & m4;
+  x = x + (x>>8);
+  x = x + (x>>16);
+  return x & 0xff;
 }
 /* 
  * logicalShift - shift x to the right by n, using a logical shift
@@ -201,7 +203,10 @@ int bitCount(int x) {
  *   Rating: 3 
  */
 int logicalShift(int x, int n) {
-  return 2;
+  int t,t1;
+  t = (~n)+31;
+  t1 = x >> n;
+  return ((t1 >> t) << t) ^ t1;
 }
 /* 
  * isNegative - return 1 if x < 0, return 0 otherwise 
