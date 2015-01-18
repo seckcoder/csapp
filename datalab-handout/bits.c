@@ -299,12 +299,20 @@ int conditional(int x, int y, int z) {
  *   Rating: 4 
  */
 int greatestBitPos(int x) {
+  /*x : >=0 or < 0 */
+  int sign = (x>>31); /* 0 or -1 */
+  int minusOne = ~0;
+  int neg_v = minusOne << 31;
   x |= (x >> 1);
   x |= (x >> 2);
   x |= (x >> 4);
   x |= (x >> 8);
   x |= (x >> 16);
-  return (x & ~(x >> 1));
+  x = x & ~(x >> 1);
+  /* sign 0 -> x
+   * -1 -> neg_v
+   *  */
+  return (sign & neg_v) | (~sign & x);
 }
 /* 
  * float_i2f - Return bit-level equivalent of expression (float) x
