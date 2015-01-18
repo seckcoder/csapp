@@ -288,7 +288,7 @@ int conditional(int x, int y, int z) {
   /* x : 0 or other */
   int boolv = !x; /* 1 or 0 */
   int mask = ~boolv + 1; /* -1 or 0 */
-  return (~mask & z) | (mask & y);
+  return (~mask & y) | (mask & z);
 }
 /* 
  * greatestBitPos - return a mask that marks the position of the
