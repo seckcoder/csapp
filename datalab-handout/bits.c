@@ -264,7 +264,18 @@ int isPower2(int x) {
  *   Rating: 2
  */
 int fitsBits(int x, int n) {
-  return 2;
+  /* int minusOne = ~0; */
+  /* int maxv = 1<<(n+minusOne); */
+  /* int minvMinusOne = ~maxv; */
+  /* int neg_x = (~x)+1; */
+  /* int sign = (x>>31); /1* -1 if <0, 0 otherwise *1/ */
+  /*        // <0, then minv <= x */
+  /* return (sign & (!!((minvMinusOne + neg_x)>>31))) | */
+  /*        // >= 0, then  x <= maxv */
+  /*        (~sign & (!(maxv + neg_x)>>31)); */
+  
+  int mask = x >> 31;
+  return !(((~x & mask) + (x & ~mask)) >> (n + ~0));
 }
 /* 
  * conditional - same as x ? y : z 
@@ -274,7 +285,10 @@ int fitsBits(int x, int n) {
  *   Rating: 3
  */
 int conditional(int x, int y, int z) {
-  return 2;
+  /* x : 0 or other */
+  int boolv = !x; /* 1 or 0 */
+  int mask = ~boolv + 1; /* -1 or 0 */
+  return (~mask & z) | (mask & y);
 }
 /* 
  * greatestBitPos - return a mask that marks the position of the
