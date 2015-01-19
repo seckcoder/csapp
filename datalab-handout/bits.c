@@ -327,6 +327,7 @@ unsigned float_i2f(int x) {
   int sign_mask = 0;
   int min_int = 0x80000000;
   int e;
+  int hx;
   if (x == 0) return 0;
   if (x == min_int) return 0xcf000000;
   if (x < 0) {
@@ -334,22 +335,19 @@ unsigned float_i2f(int x) {
     sign_mask = min_int;
   }
 
+  e = 0x4b000000; // (127 + 23) << 23
   if (x < 0x1000000) {
-    // <= 24 bits
-    e = 0x4b000000; // (127 + 23) << 23
     while (!(x & 0x800000)) {
       x = x << 1;
       e -= 0x800000; // 1 << 23
     }
-    return sign_mask | e | (x & 0x7FFFFF);
   } else {
-    e = 0x4b000000;
-    while (!(x & 0x800000)) {
+    while (x>=0x1000000) {
       x = x >> 1;
       e += 0x800000;
     }
-    return sign_mask | e | (x & 0x7FFFFF);
   }
+  return sign_mask | e | (x & 0x7FFFFF);
 }
 /* 
  * float_abs - Return bit-level equivalent of absolute value of f for
