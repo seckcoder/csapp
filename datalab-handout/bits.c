@@ -337,26 +337,31 @@ int roundToEven(int x, int k) {
   return x>>k;
 }
 unsigned float_i2f(int x) {
-  int sign_mask = 0;
-  //int e = 0x4f800000; // 159 << 23
-  int e = 30;
+  int e = 0x4e800000; // (127+30) << 23
+  int mask,halfValue,lastDigits;
   if (x == 0) return 0;
-  if (x == (1<<31)) return ((127+31)<<23) | (1<<31);
+  if (x == 0x80000000) { // (1<<31)
+    return 0xcf000000; // ((127+31)<<23) | (1<<31);
+  }
   if (x < 0) {
     x = -x;
-    sign_mask = (1<<31);
-    // e = (1<<31) + e;
+    e = 0xce800000; // e | (1<<31)
   }
 
-  while (!(x&(1<<30))) {
+  while (!(x&0x40000000)) { // 1<<30
     x <<= 1;
-    e -= 1;
+    e -= 0x800000; // (1<<23)
   }
   
   // round to even
-  
-  x = roundToEven(x, 7);
-  return (x & (0x7FFFFF)) | ((e+127) << 23) | sign_mask;
+  //x = roundToEven(x, 7);
+  mask = 0xFF;
+  halfValue = 0x40;
+  lastDigits = x & mask;
+  if (lastDigits != halfValue) {
+    x += (lastDigits & halfValue);
+  }
+  return (x >> 7) | e;
 }
 /* 
  * float_abs - Return bit-level equivalent of absolute value of f for
