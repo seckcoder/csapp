@@ -361,5 +361,7 @@ unsigned float_i2f(int x) {
  *   Rating: 2
  */
 unsigned float_abs(unsigned uf) {
-  return 2;
+  int tmp = uf & 0x7FFFFFFF;
+  if (tmp > 0x7F800000) return uf;
+  return tmp;
 }
