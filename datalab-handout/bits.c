@@ -323,31 +323,40 @@ int greatestBitPos(int x) {
  *   Max ops: 30
  *   Rating: 4
  */
+int roundToEven(int x, int k) {
+  int mask = ~((~0)<<(k+1));
+  int halfValue = 1<<(k-1);
+  int last = x & mask;
+  if (last == halfValue) {
+    // is half and zero
+    // simply ignore
+  } else {
+    // get the kth bit
+    x += (last & halfValue);
+  }
+  return x>>k;
+}
 unsigned float_i2f(int x) {
   int sign_mask = 0;
-  int min_int = 0x80000000;
-  int e;
-  int hx;
+  //int e = 0x4f800000; // 159 << 23
+  int e = 30;
   if (x == 0) return 0;
-  if (x == min_int) return 0xcf000000;
+  if (x == (1<<31)) return ((127+31)<<23) | (1<<31);
   if (x < 0) {
     x = -x;
-    sign_mask = min_int;
+    sign_mask = (1<<31);
+    // e = (1<<31) + e;
   }
 
-  e = 0x4b000000; // (127 + 23) << 23
-  if (x < 0x1000000) {
-    while (!(x & 0x800000)) {
-      x = x << 1;
-      e -= 0x800000; // 1 << 23
-    }
-  } else {
-    while (x>=0x1000000) {
-      x = x >> 1;
-      e += 0x800000;
-    }
+  while (!(x&(1<<30))) {
+    x <<= 1;
+    e -= 1;
   }
-  return sign_mask | e | (x & 0x7FFFFF);
+  
+  // round to even
+  
+  x = roundToEven(x, 7);
+  return (x & (0x7FFFFF)) | ((e+127) << 23) | sign_mask;
 }
 /* 
  * float_abs - Return bit-level equivalent of absolute value of f for
