@@ -323,45 +323,31 @@ int greatestBitPos(int x) {
  *   Max ops: 30
  *   Rating: 4
  */
-int roundToEven(int x, int k) {
-  int mask = ~((~0)<<(k+1));
-  int halfValue = 1<<(k-1);
-  int last = x & mask;
-  if (last == halfValue) {
-    // is half and zero
-    // simply ignore
-  } else {
-    // get the kth bit
-    x += (last & halfValue);
-  }
-  return x>>k;
-}
 unsigned float_i2f(int x) {
-  int e = 0x4e800000; // (127+30) << 23
-  int mask,halfValue,lastDigits;
+  int e = 0x4e800000; // ((127+30) << 23);
+  int mask, halfValue, lastDigits;
   if (x == 0) return 0;
   if (x == 0x80000000) { // (1<<31)
-    return 0xcf000000; // ((127+31)<<23) | (1<<31);
+    return 0xcf000000;  // ((127+31)<<23) | (1<<31)
   }
   if (x < 0) {
     x = -x;
-    e = 0xce800000; // e | (1<<31)
+    e = 0xce800000; // (1<<31) + e;
   }
 
   while (!(x&0x40000000)) { // 1<<30
     x <<= 1;
-    e -= 0x800000; // (1<<23)
+    e -= 0x800000; // (1<<23);
   }
   
   // round to even
-  //x = roundToEven(x, 7);
   mask = 0xFF;
   halfValue = 0x40;
   lastDigits = x & mask;
   if (lastDigits != halfValue) {
-    x += (lastDigits & halfValue);
+    e += (lastDigits & halfValue) >> 6; // calculate carry
   }
-  return (x >> 7) | e;
+  return ((x >> 7) & 0x7FFFFF) + e;
 }
 /* 
  * float_abs - Return bit-level equivalent of absolute value of f for
