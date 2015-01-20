@@ -230,10 +230,30 @@ int isNegative(int x) {
  *   Rating: 3
  */
 int isGreater(int x, int y) {
-  /* x>=y+1 => x+(-(y+1)) >= 0 */
-  y = (~(y+1))+1;
-  x=x+y;
-  return !!(x>>31);
+  int sx = x >> 31;
+  int sy = y >> 31;
+  /* x > y => x-y-1 >= 0 => x+(~y)>=0 */
+  /*
+  int tmp_res = !((x + (~y)) >> 31); // if x > y, 1 else 0
+  int same_sign = !(sx ^ sy); // 0 if same sign, -1 otherwise
+  int not_equal = !!(x ^ y); // 0 if equal, 1 otherwise
+  int x_greater = (!sx) & sy;  // 1 if x>0, y<0; 0 otherwise
+  return not_equal & (x_greater | (same_sign & tmp_res));*/
+
+  // optimized(remove one !)
+  /*
+  int tmp_res = ((x + (~y)) >> 31);
+  int same_sign = (sx ^ sy);
+  int not_equal = !!(x ^ y); // 0 if equal, 1 otherwise
+  int x_greater = (!sx) & sy;  // 1 if x>0, y<0; 0 otherwise
+  return not_equal & (x_greater | !(same_sign | tmp_res));*/
+
+  // optimized
+  int tmp_res = ((x + (~y)) >> 31);
+  int same_sign = (sx ^ sy);
+  int not_equal = !(x ^ y); // 0 if equal, 1 otherwise
+  int x_greater = sx | !sy;  // 1 if x>0, y<0; 0 otherwise
+  return !(not_equal | (x_greater & (same_sign | tmp_res)));
 }
 /*
  * isPower2 - returns 1 if x is a power of 2, and 0 otherwise
