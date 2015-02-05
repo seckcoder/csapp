@@ -53,15 +53,6 @@ int main(void) {
   int query = 50;
   int word = 10;
 
-  adds = 400;
-  dels = 100;
-  queries = 200;
-  wqueries = 100;
-  boosts = 25;
-  data = 98;
-  query = 50;
-  word = 10;
-
   /* adds = 10; */
   /* dels = 10; */
   /* queries = 10; */

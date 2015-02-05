@@ -191,11 +191,13 @@ class Node {
       if (cur >= data.length()) {
         return ;
       }
+      // the id to be removed surely exist
       Node *pn = branches.find(data[cur])->second;
       pn->removeRec(data, cur+1, id);
       // delete when empty
       if (pn->empty()) {
         delete pn;
+        branches.erase(data[cur]); // remove the node
       }
     }
     // given a query return a matching node
@@ -215,6 +217,16 @@ class Node {
         return pn->queryRec(query, cur+1);
       }
     }
+
+    void free() {
+      // delete memory
+      for (BranchMap::iterator it = branches.begin();
+          it != branches.end();
+          it++) {
+        it->second->free();
+        delete (it->second);
+      }
+    }
     
     set<string> ids;
 
@@ -222,10 +234,21 @@ class Node {
     BranchMap branches;
 };
 
+inline bool compContent(
+    const Content &content1,
+    const Content &content2) {
+  return (content1.score > content2.score ||
+      (content1.score == content2.score &&
+       content1.time > content2.time));
+}
+
 
 class Trie {
   public:
     Trie() : _timer(0) {}
+    ~Trie() {
+      root.free();
+    }
     Node root;
     typedef map<string, Content> ContentMap;
     ContentMap content_map;
@@ -280,45 +303,25 @@ class Trie {
         }
         if (match_for_all) query_ids.push_back(*const_it0);
       }
-
-      sortQueryIds(query_ids, compContentMapIter);
+      if (!query_ids.empty()) sortQueryIds(query_ids);
     }
 
-    static bool compContentMapIter(
-        const ContentMap::const_iterator it1,
-        const ContentMap::const_iterator it2) {
-      const Content &content1 = it1->second;
-      const Content &content2 = it2->second;
-      return compContent(content1, content2);
-    }
-
-    static bool compContent(
-        const Content &content1,
-        const Content &content2) {
-      if (content1.score > content2.score) return true;
-      else if (content1.score < content2.score) return false;
-      else if (content1.time > content2.time) return true;
-      else if (content1.time < content2.time) return false;
-      else return true;
-    }
 
     // sort query ids according to content map info
-    template <class Compare>
-    void sortQueryIds(vector<string> &query_ids, Compare comp) const {
-      vector<ContentMap::const_iterator> query_infos(query_ids.size());
+    void sortQueryIds(vector<string> &query_ids) const {
+      vector<Content> query_infos(query_ids.size());
       for (int i = 0; i < query_ids.size(); i++) {
-        query_infos[i] = content_map.find(query_ids[i]);
+        query_infos[i].copyCompareInfo(content_map.find(query_ids[i])->second);
       }
-      std::sort(query_infos.begin(), query_infos.end(), comp);
+      std::sort(query_infos.begin(), query_infos.end(), compContent);
       for (int i = 0; i < query_infos.size(); i++) {
-        query_ids[i] = query_infos[i]->second.id;
+        query_ids[i] = query_infos[i].id;
       }
     }
 
-    template <class Compare>
+
     void sortQueryIdsBoosted(const vector<Boost> &boosts,
-        vector<string> &query_ids,
-        Compare comp) const {
+        vector<string> &query_ids) const {
       vector<Content> query_infos(query_ids.size());
       for (int i = 0; i < query_ids.size(); i++) {
         query_infos[i].copyCompareInfo(content_map.find(query_ids[i])->second);
@@ -339,7 +342,7 @@ class Trie {
           }
         }
       }
-      std::sort(query_infos.begin(), query_infos.end(), comp);
+      std::sort(query_infos.begin(), query_infos.end(), compContent);
       for (int i = 0; i < query_infos.size(); i++) {
         query_ids[i] = query_infos[i].id;
       }
@@ -347,7 +350,7 @@ class Trie {
     void wquery(const vector<string> &tokens,
         const vector<Boost> &boosts, vector<string> &res_ids) const {
       query(tokens, res_ids);
-      sortQueryIdsBoosted(boosts, res_ids, compContent);
+      sortQueryIdsBoosted(boosts, res_ids);
     }
 
   private:
@@ -447,28 +450,13 @@ class CommandWQuery: public CommandBase {
 
 class Command {
   public:
-    void parse(const string &line) {
-      if (line.empty()) throw ParseError();
-      switch (line[0]) {
-        case 'A':
-          type = CommandType::ADD;
-          cmd_add.parse(line);
-          break;
-        case 'Q':
-          type = CommandType::QUERY;
-          cmd_query.parse(line);
-          break;
-        case 'W':
-          type = CommandType::WQUERY;
-          cmd_wquery.parse(line);
-          break;
-        case 'D':
-          type = CommandType::DEL;
-          cmd_del.parse(line);
-          break;
+    void parse(ifstream &ifs) {
+      string type;
+      ifs >> type;
+      if (type == "ADD") {
+        cmd_add.parse(ifs);
       }
     }
-    CommandType type;
     CommandAdd cmd_add;
     CommandQuery cmd_query;
     CommandDel cmd_del;
@@ -487,20 +475,20 @@ void execute(
     const CommandQuery &cmd_query, const Trie &trie) {
   vector<string> ids;
   trie.query(cmd_query.tokens, ids);
-  for (int i = 0; i < ids.size() && i < cmd_query.num_res; i++) {
-    printf("%s ", ids[i].c_str());
-  }
-  printf("\n");
+  /* for (int i = 0; i < ids.size() && i < cmd_query.num_res; i++) { */
+  /*   printf("%s ", ids[i].c_str()); */
+  /* } */
+  /* printf("\n"); */
 }
 
 void execute(
     const CommandWQuery &cmd_wquery, const Trie &trie) {
   vector<string> ids;
   trie.wquery(cmd_wquery.tokens, cmd_wquery.boosts, ids);
-  for (int i = 0; i < ids.size() && i < cmd_wquery.num_res; i++) {
-    printf("%s ", ids[i].c_str());
-  }
-  printf("\n");
+  /* for (int i = 0; i < ids.size() && i < cmd_wquery.num_res; i++) { */
+  /*   printf("%s ", ids[i].c_str()); */
+  /* } */
+  /* printf("\n"); */
 }
 
 int main() {
@@ -510,8 +498,8 @@ int main() {
   scanf("%d\n", &cmd_num);
   string input_line;
   for (int i = 1; i <= cmd_num; i++) {
-    std::getline(std::cin, input_line);
-    cmd.parse(input_line);
+    //std::getline(std::cin, input_line);
+    cmd.parse(std::cin);
     switch (cmd.type) {
       case CommandType::ADD:
         execute(cmd.cmd_add, trie);
