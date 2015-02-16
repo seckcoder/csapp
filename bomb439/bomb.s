@@ -338,11 +338,12 @@ Disassembly of section .text:
   400f67:	48 83 c4 08          	add    $0x8,%rsp
   400f6b:	c3                   	retq   
 
+// i >= 1, i <=6; a[i] = a[i-1] + i;
 0000000000400f6c <phase_2>:
   400f6c:	55                   	push   %rbp
   400f6d:	53                   	push   %rbx
-  400f6e:	48 83 ec 28          	sub    $0x28,%rsp
-  400f72:	48 89 e6             	mov    %rsp,%rsi
+  400f6e:	48 83 ec 28          	sub    $0x28,%rsp // 40 / 8 = 5
+  400f72:	48 89 e6             	mov    %rsp,%rsi // rsi points to the start of the array
   400f75:	e8 f0 08 00 00       	callq  40186a <read_six_numbers>
   400f7a:	83 3c 24 00          	cmpl   $0x0,(%rsp)
   400f7e:	79 05                	jns    400f85 <phase_2+0x19>
@@ -477,7 +478,7 @@ Disassembly of section .text:
   401166:	b8 00 00 00 00       	mov    $0x0,%eax
   40116b:	e8 10 fb ff ff       	callq  400c80 <__isoc99_sscanf@plt>
   401170:	83 f8 02             	cmp    $0x2,%eax
-  401173:	75 0e                	jne    401183 <phase_4+0x30>
+  401173:	75 0e                	jne    401183 <phase_4+0x30> // != 2
   401175:	8b 44 24 08          	mov    0x8(%rsp),%eax
   401179:	83 f8 01             	cmp    $0x1,%eax
   40117c:	7e 05                	jle    401183 <phase_4+0x30>

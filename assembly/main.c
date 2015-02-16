@@ -1,4 +1,4 @@
-
+#include <stdio.h>
 
 int bar1(int x) {
   return x;
@@ -28,7 +28,16 @@ void foo() {
   bar4(x,y,z,w);
 }
 
+
+void input() {
+  char s[] = "1 a 1";
+  int x,y;
+  char c;
+  int v = sscanf(s, "%d %c %d", &x,&c,&y);
+  printf("%d: %d %c %d\n", v, x,c,y);
+}
+
 int main() {
-  foo();
+  input();
   return 0;
 }
