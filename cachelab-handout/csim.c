@@ -196,7 +196,7 @@ void cacheModify(Cache *cache, Operation op) {
 }
 
 void printHelp() {
-  printf("help!");
+  printf("Usage: ./csim-ref [-hv] -s <s> -E <E> -b <b> -t <tracefile>\n");
 }
 int main(int argc, char **argv) {
   int s, E, b;
@@ -206,7 +206,7 @@ int main(int argc, char **argv) {
     switch (c) {
       case 'h':
         printHelp();
-        break;
+        return 0;
       case 'v':
         verbose = 1;
         break;
