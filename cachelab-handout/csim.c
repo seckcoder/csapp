@@ -45,6 +45,10 @@ void skipNotDigit(char *line, int len, int *cur) {
 Operation parseOp(char *line) {
   Operation op;
   op.op = line[1];
+
+  sscanf(line, "%*[^LSM]%c%" SCNx64 "%*[^1-9]%d",
+      &op.op, &op.addr, &op.num_bytes);
+  return op;
   int len = strlen(line);
   int cur = 2;
   skipChar(line, len, ' ', &cur);
@@ -52,8 +56,8 @@ Operation parseOp(char *line) {
   strncpy(addr_str, &line[cur], 8);
   addr_str[8] = '\0';
   sscanf(addr_str, "%" SCNx64, &op.addr);
-  cur += 8;
   skipNotDigit(line, len, &cur);
+  printf("\n%c\n", line[cur]);
   op.num_bytes = atoi(&line[cur]);
   return op;
 }
