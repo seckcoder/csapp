@@ -77,7 +77,7 @@ uint64_t getCacheSetIdx(AddressCoeff coeff, uint64_t addr) {
 
 CacheSet* getCacheSet(Cache *cache, uint64_t addr) {
   uint64_t cache_set_idx = getCacheSetIdx(cache->coeff, addr);
-  //printf(" cache set idx %llu\n", (long long unsigned)cache_set_idx);
+  // printf(" cache set idx %llu\n", (long long unsigned)cache_set_idx);
   return &(cache->cache_sets[cache_set_idx]);
 }
 
@@ -120,10 +120,15 @@ void lru_promote(CacheSet *cache_set, CacheLine *cache_line) {
   if (cache_set->head != cache_set->tail && cache_line != cache_set->head) {
     // promote only when we have more than one element and cache_line is
     // currently not the frontest element
-    
+
     // first remove the element
-    cache_line->prev->next = cache_line->next;
-    if (cache_line->next != NULL) cache_line->next->prev = cache_line->prev;
+    if (cache_line == cache_set->tail) {
+      cache_set->tail = cache_line->prev;
+      cache_line->prev->next = NULL;
+    } else {
+      cache_line->prev->next = cache_line->next;
+      cache_line->next->prev = cache_line->prev;
+    }
 
     // then insert it in the front
     cache_set->head->prev = cache_line;
@@ -136,6 +141,7 @@ void lru_promote(CacheSet *cache_set, CacheLine *cache_line) {
 void cacheLoad(Cache *cache, Operation op) {
   CacheSet *cache_set = getCacheSet(cache, op.addr);
   uint64_t addr_tag = getAddrTag(cache->coeff, op.addr);
+  // printf("tag : %llu\n", (long long unsigned)addr_tag);
   // find valid cache line with matched tag
   CacheLine *cache_line = cacheLineFindByTagAndValid(cache_set->head,
       addr_tag, 1);
@@ -162,7 +168,6 @@ void cacheLoad(Cache *cache, Operation op) {
 
 void cacheStore(Cache *cache, Operation op) {
   uint64_t addr_tag = getAddrTag(cache->coeff, op.addr);
-  // printf("tag : %llu\n", (long long unsigned)addr_tag);
   CacheSet *cache_set = getCacheSet(cache, op.addr);
   CacheLine *cache_line = cacheLineFindByTagAndValid(
       cache_set->head, addr_tag, 1);
