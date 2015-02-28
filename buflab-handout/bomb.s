@@ -798,8 +798,8 @@ Disassembly of section .text:
 0804919e <getbuf>:
  804919e:	55                   	push   %ebp
  804919f:	89 e5                	mov    %esp,%ebp
- 80491a1:	83 ec 38             	sub    $0x38,%esp
- 80491a4:	8d 45 d8             	lea    -0x28(%ebp),%eax
+ 80491a1:	83 ec 38             	sub    $0x38,%esp // 56
+ 80491a4:	8d 45 d8             	lea    -0x28(%ebp),%eax // 40 + 4
  80491a7:	89 04 24             	mov    %eax,(%esp)
  80491aa:	e8 ef f9 ff ff       	call   8048b9e <Gets>
  80491af:	b8 01 00 00 00       	mov    $0x1,%eax
