@@ -162,6 +162,7 @@ void cacheLoad(Cache *cache, Operation op) {
 
 void cacheStore(Cache *cache, Operation op) {
   uint64_t addr_tag = getAddrTag(cache->coeff, op.addr);
+  // printf("tag : %llu\n", (long long unsigned)addr_tag);
   CacheSet *cache_set = getCacheSet(cache, op.addr);
   CacheLine *cache_line = cacheLineFindByTagAndValid(
       cache_set->head, addr_tag, 1);
@@ -177,6 +178,7 @@ void cacheStore(Cache *cache, Operation op) {
       cache->eviction_num += 1;
       if (verbose) printf(" eviction");
     }
+    cache_line->valid = 1;
     cache_line->tag = addr_tag;
   }
   lru_promote(cache_set, cache_line);
