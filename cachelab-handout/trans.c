@@ -56,23 +56,15 @@ void trans(int M, int N, int A[N][M], int B[M][N])
     ENSURES(is_transpose(M, N, A, B));
 }
 
-char trans_desc1[] = "simple optimization. reduce loops by half";
+char trans_desc1[] = "test";
 void trans1(int M, int N, int A[N][M], int B[M][N])
 {
-    int i, j, tmp;
-
-    REQUIRES(M > 0);
-    REQUIRES(N > 0);
-
+    int i,j;
     for (i = 0; i < N; i++) {
-        for (j = i+1; j < M; j++) {
-            tmp = A[i][j];
-            A[i][j] = B[j][i];
-            B[j][i] = tmp;
+        for (j = 0; j < M; j++) {
+            B[j][i] = A[i][j];
         }
-    }    
-
-    ENSURES(is_transpose(M, N, A, B));
+    }
 }
 
 
@@ -90,7 +82,7 @@ void registerFunctions()
     registerTransFunction(transpose_submit, transpose_submit_desc); 
 
     /* Register any additional transpose functions */
-    registerTransFunction(trans, trans_desc); 
+    // registerTransFunction(trans, trans_desc); 
 
     registerTransFunction(trans1, trans_desc1); 
 

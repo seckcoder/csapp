@@ -17,6 +17,7 @@ tracegen: tracegen.c trans.o cachelab.c
 	$(CC) $(CFLAGS) -O0 -o tracegen tracegen.c trans.o cachelab.c
 
 trans.o: trans.c
+	$(CC) $(CFLAGS) -S trans.c
 	$(CC) $(CFLAGS) -O0 -c trans.c
 
 #
