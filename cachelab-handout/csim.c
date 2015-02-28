@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 #include "cachelab.h"
 
 typedef unsigned char Byte;
@@ -27,9 +28,39 @@ typedef struct Cache {
   uint32_t eviction_num;
 } Cache;
 
+
+void skipChar(char *line, int len, char c, int *cur) {
+  while (*cur < len && line[*cur] == c) {
+    *cur += 1;
+  }
+}
+
+#define isDigit(c) ((c) <= '9' && (c) >= '0')
+
+void skipNotDigit(char *line, int len, int *cur) {
+  while (*cur < len && !isDigit(line[*cur])) {
+    *cur += 1;
+  }
+}
 Operation parseOp(char *line) {
   Operation op;
+  op.op = line[1];
+  int len = strlen(line);
+  int cur = 2;
+  skipChar(line, len, ' ', &cur);
+  char addr_str[9];
+  strncpy(addr_str, &line[cur], 8);
+  addr_str[8] = '\0';
+  sscanf(addr_str, "%" SCNx64, &op.addr);
+  cur += 8;
+  skipNotDigit(line, len, &cur);
+  op.num_bytes = atoi(&line[cur]);
   return op;
+}
+
+void printOp(Operation op) {
+  // PRIu64 PRId64
+  printf("%c %" PRIu64 " %d\n", op.op, op.addr, op.num_bytes);
 }
 
 void cacheLoad(Cache *cache, Operation op) {
@@ -107,6 +138,7 @@ int main(int argc, char **argv) {
   char line[32];
   while (fgets(line, 32, trace_file)) {
     Operation op = parseOp(line);
+    printOp(op);
     switch (op.op) {
       case 'L':
         cacheLoad(&cache, op);
