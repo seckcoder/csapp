@@ -186,7 +186,8 @@ void cacheStore(Cache *cache, Operation op) {
 
 void cacheModify(Cache *cache, Operation op) {
   cacheLoad(cache, op);
-  cacheStore(cache, op);
+  cacheLoad(cache, op);
+  //cacheStore(cache, op);
 }
 
 void printHelp() {
@@ -288,7 +289,8 @@ int main(int argc, char **argv) {
         break;
       case 'S':
         if (verbose) printOp(op);
-        cacheStore(&cache, op);
+        //cacheStore(&cache, op);
+        cacheLoad(&cache, op);
         if (verbose) printf("\n");
         break;
       case 'M':
