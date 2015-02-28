@@ -1,2 +1,7 @@
 csim
 *.o
+*.swp
+.csim_results
+tracegen
+test-trans
+weili1_handin.tar
