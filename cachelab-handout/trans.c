@@ -56,6 +56,27 @@ void trans(int M, int N, int A[N][M], int B[M][N])
     ENSURES(is_transpose(M, N, A, B));
 }
 
+char trans_desc1[] = "simple optimization. reduce loops by half";
+void trans1(int M, int N, int A[N][M], int B[M][N])
+{
+    int i, j, tmp;
+
+    REQUIRES(M > 0);
+    REQUIRES(N > 0);
+
+    for (i = 0; i < N; i++) {
+        for (j = i+1; j < M; j++) {
+            tmp = A[i][j];
+            A[i][j] = B[j][i];
+            B[j][i] = tmp;
+        }
+    }    
+
+    ENSURES(is_transpose(M, N, A, B));
+}
+
+
+
 /*
  * registerFunctions - This function registers your transpose
  *     functions with the driver.  At runtime, the driver will
@@ -70,6 +91,8 @@ void registerFunctions()
 
     /* Register any additional transpose functions */
     registerTransFunction(trans, trans_desc); 
+
+    registerTransFunction(trans1, trans_desc1); 
 
 }
 
