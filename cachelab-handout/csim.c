@@ -77,7 +77,6 @@ uint64_t getCacheSetIdx(AddressCoeff coeff, uint64_t addr) {
 
 CacheSet* getCacheSet(Cache *cache, uint64_t addr) {
   uint64_t cache_set_idx = getCacheSetIdx(cache->coeff, addr);
-  // printf(" cache set idx %llu\n", (long long unsigned)cache_set_idx);
   return &(cache->cache_sets[cache_set_idx]);
 }
 
@@ -138,10 +137,15 @@ void lru_promote(CacheSet *cache_set, CacheLine *cache_line) {
   }
 }
 
+void debug_info(Cache *cache, Operation op) {
+  printf(" tag: %llu set: %llu ",
+      (long long unsigned)getAddrTag(cache->coeff, op.addr),
+      (long long unsigned)getCacheSetIdx(cache->coeff, op.addr));
+}
+
 void cacheLoad(Cache *cache, Operation op) {
   CacheSet *cache_set = getCacheSet(cache, op.addr);
   uint64_t addr_tag = getAddrTag(cache->coeff, op.addr);
-  // printf("tag : %llu\n", (long long unsigned)addr_tag);
   // find valid cache line with matched tag
   CacheLine *cache_line = cacheLineFindByTagAndValid(cache_set->head,
       addr_tag, 1);
@@ -289,17 +293,19 @@ int main(int argc, char **argv) {
     switch (op.op) {
       case 'L':
         if (verbose) printOp(op);
+        debug_info(&cache, op);
         cacheLoad(&cache, op);
         if (verbose) printf("\n");
         break;
       case 'S':
         if (verbose) printOp(op);
-        //cacheStore(&cache, op);
+        debug_info(&cache, op);
         cacheLoad(&cache, op);
         if (verbose) printf("\n");
         break;
       case 'M':
         if (verbose) printOp(op);
+        debug_info(&cache, op);
         cacheModify(&cache, op);
         if (verbose) printf("\n");
         break;
