@@ -182,6 +182,39 @@ main(int argc, char **argv)
     exit(0); /* control never reaches here */
 }
 
+void
+evalNonBuiltin(struct cmdline_tokens tok, char *cmdline, int bg) {
+    pid_t pid = fork();
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGTSTP);
+    sigaddset(&mask, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &mask, NULL); // block signals
+    if (pid == 0) {
+        setpgid(0, 0); // change group of current process
+        sigprocmask(SIG_UNBLOCK, &mask, NULL); // unblock signals
+        execve(tok.argv[0], tok.argv, environ);
+    } else {
+        // for each job, create a unique group id = pid
+            
+        if (bg) {
+            addjob(job_list, pid, BG, cmdline);
+        } else {
+            addjob(job_list, pid, FG, cmdline);
+        }
+
+        sigprocmask(SIG_UNBLOCK, &mask, NULL); // unblock signals
+        if (!bg) {
+            // TODO: should we call waitpid here?
+            if ((pid = waitpid(pid, NULL, 0)) > 0) { // wait until finished
+                // TODO: is it possible for bg job deleted twice?
+                deletejob(job_list, pid);
+            }
+        }
+    }
+}
+
 /* 
  * eval - Evaluate the command line that the user has just typed in
  * 
@@ -206,6 +239,10 @@ eval(char *cmdline)
         return;
     if (tok.argv[0] == NULL) /* ignore empty lines */
         return;
+    if (tok.builtins == BUILTIN_NONE) {
+        evalNonBuiltin(tok, cmdline, bg);
+    } else if (tok.builtins == BUILTIN_BG) {
+    }
 
     return;
 }
@@ -371,8 +408,13 @@ parseline(const char *cmdline, struct cmdline_tokens *tok)
  *     for any other currently running children to terminate.  
  */
 void 
-sigchld_handler(int sig) 
-{
+sigchld_handler(int sig) {
+    pid_t pid;
+    while ((pid = waitpid(-1, NULL, 0)) > 0)
+        deletejob(job_list, pid);
+    if (errno != ECHILD) {
+        // TODO: print error message
+    }
     return;
 }
 
@@ -384,6 +426,13 @@ sigchld_handler(int sig)
 void 
 sigint_handler(int sig) 
 {
+    pid_t pid = fgpid(job_list);
+    if (pid > 0) {
+        // send SIGNINT to every process in the group
+        if (kill(-pid, SIGINT) != 0) {
+            // TODO: print error msg
+        }
+    }
     return;
 }
 
@@ -395,6 +444,12 @@ sigint_handler(int sig)
 void 
 sigtstp_handler(int sig) 
 {
+    pid_t pid = fgpid(job_list);
+    if (pid > 0) {
+        if (kill(-pid, SIGTSTP) != 0) {
+            // TODO: print error msg
+        }
+    }
     return;
 }
 
