@@ -7,7 +7,7 @@ CC = /usr/bin/gcc
 CFLAGS = -Wall -g -Werror
 
 
-FILES = sdriver runtrace tsh myspin1 myspin2 myenv myintp myints mytstpp mytstps mysplit mysplitp mycat
+FILES = sdriver runtrace tsh myspin1 myspin2 myenv myintp myints mytstpp mytstps mysplit mysplitp mycat test
 
 all: $(FILES)
 
@@ -17,6 +17,9 @@ all: $(FILES)
 #
 tsh: tsh.c fork.c
 	$(CC) $(CFLAGS)   -Wl,--wrap,fork -o tsh tsh.c fork.c $(LIBS)
+
+test:test.c
+	$(CC) $(CFLAGS) -o test test.c
 
 sdriver: sdriver.o driverlib.o
 sdriver.o: sdriver.c config.h

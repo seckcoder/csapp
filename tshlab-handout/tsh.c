@@ -159,8 +159,10 @@ main(int argc, char **argv)
             printf("%s", prompt);
             fflush(stdout);
         }
-        if ((fgets(cmdline, MAXLINE, stdin) == NULL) && ferror(stdin))
+        if ((fgets(cmdline, MAXLINE, stdin) == NULL) && ferror(stdin)) {
+            printf("%s %d %d\n", cmdline, ferror(stdin), errno);
             app_error("fgets error");
+        }
         if (feof(stdin)) { 
             /* End of file (ctrl-d) */
             printf ("\n");
@@ -176,7 +178,7 @@ main(int argc, char **argv)
         eval(cmdline);
         
         fflush(stdout);
-        fflush(stdout);
+        fflush(stderr);
     } 
     
     exit(0); /* control never reaches here */
@@ -194,7 +196,10 @@ evalNonBuiltin(struct cmdline_tokens tok, char *cmdline, int bg) {
     if (pid == 0) {
         setpgid(0, 0); // change group of current process
         sigprocmask(SIG_UNBLOCK, &mask, NULL); // unblock signals
-        execve(tok.argv[0], tok.argv, environ);
+        if (execve(tok.argv[0], tok.argv, environ) < 0) {
+            fprintf(stdout, "%s: Command not found.\n", cmdline);
+            exit(1);
+        }
     } else {
         // for each job, create a unique group id = pid
             
@@ -209,7 +214,11 @@ evalNonBuiltin(struct cmdline_tokens tok, char *cmdline, int bg) {
             // TODO: should we call waitpid here?
             if ((pid = waitpid(pid, NULL, 0)) > 0) { // wait until finished
                 // TODO: is it possible for bg job deleted twice?
+                // Ans: No. It's impossible. If pid is already finished, then
+                // waitpid will return immediately with a non positive return value.
                 deletejob(job_list, pid);
+            } else {
+                // TODO: what we should do here?
             }
         }
     }
@@ -410,8 +419,9 @@ parseline(const char *cmdline, struct cmdline_tokens *tok)
 void 
 sigchld_handler(int sig) {
     pid_t pid;
-    while ((pid = waitpid(-1, NULL, 0)) > 0)
+    while ((pid = waitpid(-1, NULL, 0)) > 0) {
         deletejob(job_list, pid);
+    }
     if (errno != ECHILD) {
         // TODO: print error message
     }
