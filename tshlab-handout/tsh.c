@@ -107,6 +107,11 @@ typedef void handler_t(int);
 handler_t *Signal(int signum, handler_t *handler);
 
 
+/* debugging functions */
+
+// The following two functions are from "The Linux Programming Interface"
+void printSigset(FILE *of, const char *prefix, const sigset_t *sigset);
+int printSigMask(FILE *of, const char *msg);
 
 /*
  * main - The shell's main routine 
@@ -187,7 +192,6 @@ main(int argc, char **argv)
 
 void
 evalNonBuiltin(struct cmdline_tokens tok, char *cmdline, int bg) {
-    pid_t pid = fork();
     sigset_t mask;
     sigset_t oldmask;
     sigemptyset(&mask);
@@ -196,6 +200,8 @@ evalNonBuiltin(struct cmdline_tokens tok, char *cmdline, int bg) {
     sigaddset(&mask, SIGCHLD);
     // sigaddset(&mask, SIGCONT); // child process react to SIGCONT
     sigprocmask(SIG_BLOCK, &mask, &oldmask); // block signals
+    // printSigset(stdout, "sigset oldmask", &oldmask);
+    pid_t pid = fork();
     if (pid == 0) {
         setpgid(0, 0); // change group of current process
         sigprocmask(SIG_UNBLOCK, &mask, &oldmask); // unblock signals
@@ -211,6 +217,7 @@ evalNonBuiltin(struct cmdline_tokens tok, char *cmdline, int bg) {
             addjob(job_list, pid, FG, cmdline);
         }
 
+        // race condition
         if (!bg) {
             // printf("foreground job, wait until succeed\n");
             sigsuspend(&oldmask);
@@ -455,18 +462,18 @@ parseline(const char *cmdline, struct cmdline_tokens *tok)
  */
 void 
 sigchld_handler(int sig) {
-    printf("sigchld_handler called: %d %d %d\n", sig, SIGTSTP, SIGCHLD);
+    // printf("sigchld_handler called: %d %d %d\n", sig, SIGTSTP, SIGCHLD);
     pid_t pid;
     int status;
     while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED)) > 0) {
         if (WIFEXITED(status)) {
-            printf("terminated normaly\n");
+            // printf("terminated normaly\n");
             deletejob(job_list, pid);
         } else if (WIFSIGNALED(status)) {
-            printf("terminated by signal\n");
+            // printf("terminated by signal\n");
             deletejob(job_list,pid);
         } else if (WIFSTOPPED(status)) {
-            printf("stopped thread\n");
+            // printf("stopped thread\n");
             struct job_t *pjob = getjobpid(job_list, pid);
             pjob->state = BG; // modify it to become a background job
         } else {
@@ -818,3 +825,34 @@ sigquit_handler(int sig)
     exit(1);
 }
 
+void                    /* Print list of signals within a signal set */
+printSigset(FILE *of, const char *prefix, const sigset_t *sigset)
+{
+  int sig, cnt;
+
+  cnt = 0;
+  for (sig = 1; sig < NSIG; sig++) {
+    if (sigismember(sigset, sig)) {
+      cnt++;
+      fprintf(of, "%s%d (%s)\n", prefix, sig, strsignal(sig));
+    }
+  }
+
+  if (cnt == 0)
+    fprintf(of, "%s<empty signal set>\n", prefix);
+}
+int                     /* Print mask of blocked signals for this process */
+printSigMask(FILE *of, const char *msg)
+{
+  sigset_t currMask;
+
+  if (msg != NULL)
+    fprintf(of, "%s", msg);
+
+  if (sigprocmask(SIG_BLOCK, NULL, &currMask) == -1)
+    return -1;
+
+  printSigset(of, "\t\t", &currMask);
+
+  return 0;
+}
