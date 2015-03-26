@@ -188,14 +188,15 @@ void
 evalNonBuiltin(struct cmdline_tokens tok, char *cmdline, int bg) {
     pid_t pid = fork();
     sigset_t mask;
+    sigset_t oldmask;
     sigemptyset(&mask);
     sigaddset(&mask, SIGINT);
     sigaddset(&mask, SIGTSTP);
     sigaddset(&mask, SIGCHLD);
-    sigprocmask(SIG_BLOCK, &mask, NULL); // block signals
+    sigprocmask(SIG_BLOCK, &mask, &oldmask); // block signals
     if (pid == 0) {
         setpgid(0, 0); // change group of current process
-        sigprocmask(SIG_UNBLOCK, &mask, NULL); // unblock signals
+        sigprocmask(SIG_UNBLOCK, &mask, &oldmask); // unblock signals
         if (execve(tok.argv[0], tok.argv, environ) < 0) {
             fprintf(stdout, "%s: Command not found.\n", cmdline);
             exit(1);
@@ -209,17 +210,13 @@ evalNonBuiltin(struct cmdline_tokens tok, char *cmdline, int bg) {
             addjob(job_list, pid, FG, cmdline);
         }
 
-        sigprocmask(SIG_UNBLOCK, &mask, NULL); // unblock signals
         if (!bg) {
-            // TODO: should we call waitpid here?
-            if ((pid = waitpid(pid, NULL, 0)) > 0) { // wait until finished
-                // TODO: is it possible for bg job deleted twice?
-                // Ans: No. It's impossible. If pid is already finished, then
-                // waitpid will return immediately with a non positive return value.
-                deletejob(job_list, pid);
-            } else {
-                // TODO: what we should do here?
-            }
+            printf("foreground job, wait until succeed\n");
+            sigsuspend(&oldmask);
+            sigprocmask(SIG_UNBLOCK, &mask, &oldmask); // unblock signals
+            printf("foreground job ...\n");
+        } else {
+            sigprocmask(SIG_UNBLOCK, &mask, &oldmask); // unblock signals
         }
     }
 }
@@ -250,7 +247,9 @@ eval(char *cmdline)
         return;
     if (tok.builtins == BUILTIN_NONE) {
         evalNonBuiltin(tok, cmdline, bg);
-    } else if (tok.builtins == BUILTIN_BG) {
+    } else if (tok.builtins == BUILTIN_JOBS) {
+      listjobs(job_list, 1);
+    } else {
     }
 
     return;
@@ -418,14 +417,29 @@ parseline(const char *cmdline, struct cmdline_tokens *tok)
  */
 void 
 sigchld_handler(int sig) {
+    // printf("sigchld_handler called: %d %d %d\n", sig, SIGTSTP, SIGCHLD);
+    // terminated
+    // TODO: is there any better method to decide whether the signal is a
     pid_t pid;
-    while ((pid = waitpid(-1, NULL, 0)) > 0) {
-        deletejob(job_list, pid);
+    int status;
+    while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED)) > 0) {
+        if (WIFEXITED(status)) {
+            // printf("terminated normaly\n");
+            deletejob(job_list, pid);
+        } else if (WIFSIGNALED(status)) {
+            // printf("terminated by signal\n");
+            deletejob(job_list,pid);
+        } else if (WIFSTOPPED(status)) {
+            // printf("stopped thread\n");
+            struct job_t *pjob = getjobpid(job_list, pid);
+            pjob->state = BG; // modify it to become a background job
+        } else {
+            // printf("Unhandled status: %d\n", status);
+        }
     }
     if (errno != ECHILD) {
         // TODO: print error message
     }
-    return;
 }
 
 /* 
@@ -454,11 +468,18 @@ sigint_handler(int sig)
 void 
 sigtstp_handler(int sig) 
 {
+    printf("sigtstp handler\n");
     pid_t pid = fgpid(job_list);
     if (pid > 0) {
+        printf("%d\n", pid);
         if (kill(-pid, SIGTSTP) != 0) {
             // TODO: print error msg
+            printf("sigtstp failed\n");
+        } else {
+          printf("sigtstp succeed\n");
         }
+    } else {
+      printf("no frontend jobs\n");
     }
     return;
 }
