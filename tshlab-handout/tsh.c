@@ -187,17 +187,17 @@ main(int argc, char **argv)
             fflush(stderr);
             exit(0);
         }
-        
+
         /* Remove the trailing newline */
         cmdline[strlen(cmdline)-1] = '\0';
-        
+
         /* Evaluate the command line */
         eval(cmdline);
-        
+
         fflush(stdout);
         fflush(stdout);
     } 
-    
+
     exit(0); /* control never reaches here */
 }
 
@@ -221,7 +221,10 @@ evalNonBuiltin(struct cmdline_tokens tok, char *cmdline, int bg) {
             dup2(infd, 0); // redirect stdin to infd
         }
         if (tok.outfile) {
-            int outfd = open(tok.outfile, O_CREAT | O_TRUNC | O_WRONLY, DEF_MODE);
+            int outfd = open(
+                    tok.outfile,
+                    O_CREAT | O_TRUNC | O_WRONLY,
+                    DEF_MODE);
             dup2(outfd, 1); // redirect stdout to outfd
         }
         if (execve(tok.argv[0], tok.argv, environ) < 0) {
@@ -302,13 +305,12 @@ eval(char *cmdline)
             }
             struct job_t *job = getjobid(job_list, tok.argv[1]);
             // TODO: should we check the pid in the joblist?
-            // Case : If we send signal to a job created in another tsh process?
-            // Case : How to test bg?
+            // Case : If we send signal to a job created in another tsh
+            //        process?
             if (job && job->state == BG) {
                 sprintf(err_msg, "job already in background: %s", cmdline);
                 app_error(err_msg);
             } else if (job) {
-                // take the frontend job to background
                 bgJob(job, cmdline);
             } else {
                 sprintf(err_msg, "job not found: %s failed", cmdline);
@@ -329,8 +331,10 @@ eval(char *cmdline)
                 app_error(err_msg);
             }
         }
-        // close the opened files.
-        // recover stdin/stdout
+        /*
+         * close the opened files.
+         * recover stdin/stdout
+         */
         if (infd != -1) {
             close(infd);
             dup2(stdin_copy, 0);
@@ -505,24 +509,39 @@ parseline(const char *cmdline, struct cmdline_tokens *tok)
  *     for any other currently running children to terminate.  
  */
 void 
-sigchld_handler(int sig) {
-    // printf("sigchld_handler called: %d %d %d\n", sig, SIGTSTP, SIGCHLD);
+sigchld_handler(int sig)
+{
     pid_t pid;
     int status;
+    /*
+     * Handle all sigchld cases.
+     * Note return immediately without blocking
+     */
     while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED)) > 0) {
         if (WIFEXITED(status)) {
+            // terminated normaly
             if (verbose) printf("terminated normaly\n");
             deletejob(job_list, pid);
         } else if (WIFSIGNALED(status)) {
+            // terminated by signal
             if (verbose) printf("terminated by signal\n");
             struct job_t *job = getjobpid(job_list, pid);
-            fprintf(stdout, terminated_by_signal, job->jid, job->pid, WTERMSIG(status));
+            fprintf(stdout,
+                    terminated_by_signal,
+                    job->jid,
+                    job->pid,
+                    WTERMSIG(status));
             deletejob(job_list,pid);
         } else if (WIFSTOPPED(status)) {
-            if (verbose) printf("stopped thread\n");
+            // stopped by signal
+            if (verbose) printf("stopped by signal\n");
             struct job_t *job = getjobpid(job_list, pid);
             job->state = ST; // modify it to become a stopped job
-            fprintf(stdout, stopped_by_signal, job->jid, job->pid, WSTOPSIG(status));
+            fprintf(stdout,
+                    stopped_by_signal,
+                    job->jid,
+                    job->pid,
+                    WSTOPSIG(status));
         } else {
             printf("Unhandled status: %d\n", status);
         }
@@ -546,6 +565,7 @@ sigint_handler(int sig)
         // send SIGNINT to every process in the group
         if (kill(-pid, SIGINT) != 0) {
             // TODO: print error msg
+            app_error("stop child process failed");
         }
     }
     return;
@@ -561,15 +581,10 @@ sigtstp_handler(int sig)
 {
     pid_t pid = fgpid(job_list);
     if (pid > 0) {
-        // printf("%d\n", pid);
         if (kill(-pid, SIGTSTP) != 0) {
             // TODO: print error msg
             app_error("sigtstp failed\n");
-        } else {
-          // printf("sigtstp succeed\n");
         }
-    } else {
-      // printf("no frontend jobs\n");
     }
     return;
 }
@@ -663,7 +678,8 @@ deletejob(struct job_t *job_list, pid_t pid)
 
 /* fgpid - Return PID of current foreground job, 0 if no such job */
 pid_t 
-fgpid(struct job_t *job_list) {
+fgpid(struct job_t *job_list)
+{
     int i;
 
     for (i = 0; i < MAXJOBS; i++)
@@ -674,7 +690,8 @@ fgpid(struct job_t *job_list) {
 
 /* getjobpid  - Find a job (by PID) on the job list */
 struct job_t 
-*getjobpid(struct job_t *job_list, pid_t pid) {
+*getjobpid(struct job_t *job_list, pid_t pid)
+{
     int i;
 
     if (pid < 1)
@@ -779,7 +796,8 @@ listjobs(struct job_t *job_list, int output_fd)
 }
 
 /* bgJob  - restart the stopped job to background */
-void bgJob(struct job_t *job, const char *cmdline) {
+void bgJob(struct job_t *job, const char *cmdline)
+{
     sigset_t mask, oldmask;
     sigemptyset(&mask);
     sigaddset(&mask, SIGINT);
@@ -796,7 +814,8 @@ void bgJob(struct job_t *job, const char *cmdline) {
 }
 
 /* fgJob  - restart the stopped job in foreground */
-void fgJob(struct job_t *job) {
+void fgJob(struct job_t *job)
+{
     // block the signal in case job->state
     // is modified before we modify it now.
     sigset_t mask, oldmask;
@@ -819,7 +838,8 @@ void fgJob(struct job_t *job) {
 /* waitfg - wait until foreground jobs finished
  * mask: the set of signals we want to block when waiting
  */
-void waitfg(sigset_t *mask) {
+void waitfg(sigset_t *mask)
+{
     pid_t pid;
     // while exist a front end job, we wait
     while ((pid=fgpid(job_list))) {
