@@ -190,7 +190,6 @@ main(int argc, char **argv)
         
         /* Remove the trailing newline */
         cmdline[strlen(cmdline)-1] = '\0';
-        // fflush(stdout);
         
         /* Evaluate the command line */
         eval(cmdline);
@@ -204,15 +203,17 @@ main(int argc, char **argv)
 
 void
 evalNonBuiltin(struct cmdline_tokens tok, char *cmdline, int bg) {
+    // block signals to avoid race condition
     sigset_t waitmask;
     sigset_t oldmask;
     sigemptyset(&waitmask);
     sigaddset(&waitmask, SIGINT);
     sigaddset(&waitmask, SIGTSTP);
     sigaddset(&waitmask, SIGCHLD);
-    sigprocmask(SIG_BLOCK, &waitmask, &oldmask); // block wait signals
+    sigprocmask(SIG_BLOCK, &waitmask, &oldmask);
     pid_t pid = fork();
     if (pid == 0) {
+        // child process
         sigprocmask(SIG_SETMASK, &oldmask, NULL); // recover mask
         setpgid(0, 0); // change group of current process
         if (tok.infile) {
@@ -235,8 +236,6 @@ evalNonBuiltin(struct cmdline_tokens tok, char *cmdline, int bg) {
         } else {
             addjob(job_list, pid, FG, cmdline);
         }
-        // fprintf(stdout, "parent executing..: %s\n", cmdline);
-        // fflush(stdout);
 
         if (!bg) {
             // TODO: whatif oldmask contains SIGTSTP/SIGCHLD?
@@ -284,10 +283,12 @@ eval(char *cmdline)
         int stdin_copy = dup(0),
             stdout_copy = dup(1);
         if (tok.infile) {
+            // redirect stdin to infile
             infd = open(tok.infile, O_RDONLY, 0);
             dup2(infd, 0);
         }
         if (tok.outfile) {
+            // redirect stdout
             outfd = open(tok.outfile, O_CREAT | O_TRUNC | O_WRONLY, DEF_MODE);
             dup2(outfd, 1);
         }
@@ -328,6 +329,8 @@ eval(char *cmdline)
                 app_error(err_msg);
             }
         }
+        // close the opened files.
+        // recover stdin/stdout
         if (infd != -1) {
             close(infd);
             dup2(stdin_copy, 0);
@@ -796,7 +799,6 @@ void bgJob(struct job_t *job, const char *cmdline) {
 void fgJob(struct job_t *job) {
     // block the signal in case job->state
     // is modified before we modify it now.
-    // printf("fgjob: %d\n", job->pid);
     sigset_t mask, oldmask;
     sigemptyset(&mask);
     sigaddset(&mask, SIGINT);
@@ -896,34 +898,36 @@ sigquit_handler(int sig)
     exit(1);
 }
 
-void                    /* Print list of signals within a signal set */
+/* Print list of signals within a signal set */
+void 
 printSigset(FILE *of, const char *prefix, const sigset_t *sigset)
 {
-  int sig, cnt;
+    int sig, cnt;
 
-  cnt = 0;
-  for (sig = 1; sig < NSIG; sig++) {
-    if (sigismember(sigset, sig)) {
-      cnt++;
-      fprintf(of, "%s%d (%s)\n", prefix, sig, strsignal(sig));
+    cnt = 0;
+    for (sig = 1; sig < NSIG; sig++) {
+        if (sigismember(sigset, sig)) {
+            cnt++;
+            fprintf(of, "%s%d (%s)\n", prefix, sig, strsignal(sig));
+        }
     }
-  }
 
-  if (cnt == 0)
-    fprintf(of, "%s<empty signal set>\n", prefix);
+    if (cnt == 0)
+        fprintf(of, "%s<empty signal set>\n", prefix);
 }
-int                     /* Print mask of blocked signals for this process */
+/* Print mask of blocked signals for this process */
+int
 printSigMask(FILE *of, const char *msg)
 {
-  sigset_t currMask;
+    sigset_t currMask;
 
-  if (msg != NULL)
-    fprintf(of, "%s", msg);
+    if (msg != NULL)
+        fprintf(of, "%s", msg);
 
-  if (sigprocmask(SIG_BLOCK, NULL, &currMask) == -1)
-    return -1;
+    if (sigprocmask(SIG_BLOCK, NULL, &currMask) == -1)
+        return -1;
 
-  printSigset(of, "\t\t", &currMask);
+    printSigset(of, "\t\t", &currMask);
 
-  return 0;
+    return 0;
 }
