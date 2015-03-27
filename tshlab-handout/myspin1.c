@@ -85,15 +85,17 @@ int main(int argc, char **argv)
 
 	if (!standalone) {
 		alarm(JOB_TIMEOUT);
-		cmdp = "";
+		cmdp = "hello world";
 		if ((rc = send(syncfd, cmdp, strlen(cmdp), 0)) < 0) {
 			perror("send");
 			exit(1);
-		}
+		} else {
+    }
 		if ((rc = recv(syncfd, buf, MAXBUF, 0)) < 0) {
 			perror("recv");
 			exit(1);
-		}
+		} else {
+    }
 		exit(0);
 	}
 	/*

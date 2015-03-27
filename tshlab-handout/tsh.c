@@ -43,6 +43,9 @@
 #define ST_INFILE   0x1   /* next token is the input file */
 #define ST_OUTFILE  0x2   /* next token is the output file */
 
+/* default file create mode */
+#define DEF_MODE S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH
+
 
 /* Global variables */
 extern char **environ;      /* defined in libc */
@@ -72,6 +75,12 @@ struct cmdline_tokens {
         BUILTIN_FG} builtins;
 };
 
+// Some print format
+const char *bg_notify = "[%d] (%d) %s\n";
+const char *command_not_found = "%s: Command not found\n";
+const char *terminated_by_signal = "Job [%d] (%d) terminated by signal %d\n";
+const char *stopped_by_signal = "Job [%d] (%d) stopped by signal %d\n";
+
 /* End global variables */
 
 
@@ -94,11 +103,12 @@ int deletejob(struct job_t *job_list, pid_t pid);
 pid_t fgpid(struct job_t *job_list);
 struct job_t *getjobpid(struct job_t *job_list, pid_t pid);
 struct job_t *getjobjid(struct job_t *job_list, int jid); 
-struct job_t *getjobid(struct job_t *job_list, pid_t id);
+struct job_t *getjobid(struct job_t *job_list, char *id);
 int pid2jid(pid_t pid); 
 void listjobs(struct job_t *job_list, int output_fd);
-void bgJob(struct job_t *job);
+void bgJob(struct job_t *job, const char *cmdline);
 void fgJob(struct job_t *job);
+void waitfg(sigset_t *mask);
 
 void usage(void);
 void unix_error(char *msg);
@@ -148,7 +158,9 @@ main(int argc, char **argv)
 
     /* These are the ones you will need to implement */
     Signal(SIGINT,  sigint_handler);   /* ctrl-c */
-    Signal(SIGTSTP, sigtstp_handler);  /* ctrl-z */ Signal(SIGCHLD, sigchld_handler);  /* Terminated or stopped child */ Signal(SIGTTIN, SIG_IGN);
+    Signal(SIGTSTP, sigtstp_handler);  /* ctrl-z */
+    Signal(SIGCHLD, sigchld_handler);  /* Terminated or stopped child */
+    Signal(SIGTTIN, SIG_IGN);
     Signal(SIGTTOU, SIG_IGN);
 
     /* This one provides a clean way to kill the shell */
@@ -166,7 +178,6 @@ main(int argc, char **argv)
             fflush(stdout);
         }
         if ((fgets(cmdline, MAXLINE, stdin) == NULL) && ferror(stdin)) {
-            printf("%s %d %d\n", cmdline, ferror(stdin), errno);
             app_error("fgets error");
         }
         if (feof(stdin)) { 
@@ -179,12 +190,13 @@ main(int argc, char **argv)
         
         /* Remove the trailing newline */
         cmdline[strlen(cmdline)-1] = '\0';
+        // fflush(stdout);
         
         /* Evaluate the command line */
         eval(cmdline);
         
         fflush(stdout);
-        fflush(stderr);
+        fflush(stdout);
     } 
     
     exit(0); /* control never reaches here */
@@ -192,39 +204,50 @@ main(int argc, char **argv)
 
 void
 evalNonBuiltin(struct cmdline_tokens tok, char *cmdline, int bg) {
-    sigset_t mask;
+    sigset_t waitmask;
     sigset_t oldmask;
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGINT);
-    sigaddset(&mask, SIGTSTP);
-    sigaddset(&mask, SIGCHLD);
-    // sigaddset(&mask, SIGCONT); // child process react to SIGCONT
-    sigprocmask(SIG_BLOCK, &mask, &oldmask); // block signals
-    // printSigset(stdout, "sigset oldmask", &oldmask);
+    sigemptyset(&waitmask);
+    sigaddset(&waitmask, SIGINT);
+    sigaddset(&waitmask, SIGTSTP);
+    sigaddset(&waitmask, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &waitmask, &oldmask); // block wait signals
     pid_t pid = fork();
     if (pid == 0) {
+        sigprocmask(SIG_SETMASK, &oldmask, NULL); // recover mask
         setpgid(0, 0); // change group of current process
-        sigprocmask(SIG_UNBLOCK, &mask, &oldmask); // unblock signals
+        if (tok.infile) {
+            int infd = open(tok.infile, O_RDONLY, 0);
+            dup2(infd, 0); // redirect stdin to infd
+        }
+        if (tok.outfile) {
+            int outfd = open(tok.outfile, O_CREAT | O_TRUNC | O_WRONLY, DEF_MODE);
+            dup2(outfd, 1); // redirect stdout to outfd
+        }
         if (execve(tok.argv[0], tok.argv, environ) < 0) {
-            fprintf(stdout, "%s: Command not found.\n", cmdline);
+            fprintf(stdout, command_not_found, cmdline);
+            fflush(stdout);
             exit(1);
         }
     } else {
-        // for each job, create a unique group id = pid
+        // critical region to protect from signal
         if (bg) {
             addjob(job_list, pid, BG, cmdline);
         } else {
             addjob(job_list, pid, FG, cmdline);
         }
+        // fprintf(stdout, "parent executing..: %s\n", cmdline);
+        // fflush(stdout);
 
-        // race condition
         if (!bg) {
-            // printf("foreground job, wait until succeed\n");
-            sigsuspend(&oldmask);
-            sigprocmask(SIG_UNBLOCK, &mask, &oldmask); // unblock signals
-            // printf("foreground job ...\n");
+            // TODO: whatif oldmask contains SIGTSTP/SIGCHLD?
+            // In that case, the main process won't never be stopped by the
+            // signals...
+            waitfg(&oldmask);
+            sigprocmask(SIG_SETMASK, &oldmask, NULL); // still necessary.
         } else {
-            sigprocmask(SIG_UNBLOCK, &mask, &oldmask); // unblock signals
+            struct job_t *job = getjobpid(job_list, pid);
+            fprintf(stdout, bg_notify, job->jid, job->pid, cmdline);
+            sigprocmask(SIG_SETMASK, &oldmask, NULL); // recover mask
         }
     }
 }
@@ -256,44 +279,62 @@ eval(char *cmdline)
         return;
     if (tok.builtins == BUILTIN_NONE) {
         evalNonBuiltin(tok, cmdline, bg);
-    } else if (tok.builtins == BUILTIN_JOBS) {
-        listjobs(job_list, 1);
-    } else if (tok.builtins == BUILTIN_QUIT) {
-        printf("EXITED...\n");
-        exit(0);
-    } else if (tok.builtins == BUILTIN_BG) {
-        if (tok.argc != 2) {
-            app_error("WRONG BG COMMAND");
+    } else {
+        int infd = -1, outfd = -1;
+        int stdin_copy = dup(0),
+            stdout_copy = dup(1);
+        if (tok.infile) {
+            infd = open(tok.infile, O_RDONLY, 0);
+            dup2(infd, 0);
         }
-        pid_t id = atoi(tok.argv[1]);
-        struct job_t *pjob = getjobid(job_list, id);
-        // TODO: should we check the pid in the joblist?
-        // Case : If we send signal to a job created in another tsh process?
-        // Case : How to test bg?
-        if (pjob && pjob->state == BG) {
-            sprintf(err_msg, "-tsh: bg: job %d already in background", id);
-            app_error(err_msg);
-        } else if (pjob) {
-            // take the frontend job to background
-            bgJob(pjob);
-        } else {
-            sprintf(err_msg, "-tsh: bg: %d: no such job", id);
-            app_error(err_msg);
+        if (tok.outfile) {
+            outfd = open(tok.outfile, O_CREAT | O_TRUNC | O_WRONLY, DEF_MODE);
+            dup2(outfd, 1);
         }
-    } else if (tok.builtins == BUILTIN_FG) {
-        if (tok.argc != 2) {
-            app_error("WRONG FG COMMAND");
+        if (tok.builtins == BUILTIN_JOBS) {
+            listjobs(job_list, 1);
+        } else if (tok.builtins == BUILTIN_QUIT) {
+            exit(0);
+        } else if (tok.builtins == BUILTIN_BG) {
+            if (tok.argc != 2) {
+                app_error("WRONG BG COMMAND");
+            }
+            struct job_t *job = getjobid(job_list, tok.argv[1]);
+            // TODO: should we check the pid in the joblist?
+            // Case : If we send signal to a job created in another tsh process?
+            // Case : How to test bg?
+            if (job && job->state == BG) {
+                sprintf(err_msg, "job already in background: %s", cmdline);
+                app_error(err_msg);
+            } else if (job) {
+                // take the frontend job to background
+                bgJob(job, cmdline);
+            } else {
+                sprintf(err_msg, "job not found: %s failed", cmdline);
+                app_error(err_msg);
+            }
+        } else if (tok.builtins == BUILTIN_FG) {
+            if (tok.argc != 2) {
+                app_error("WRONG FG COMMAND");
+            }
+            struct job_t *job = getjobid(job_list, tok.argv[1]);
+            if (job && job->state == FG) {
+                sprintf(err_msg, "job already in foreground: %s", cmdline);
+                app_error(err_msg);
+            } else if (job) {
+                fgJob(job);
+            } else {
+                sprintf(err_msg, "job not found: %s", cmdline);
+                app_error(err_msg);
+            }
         }
-        pid_t id = atoi(tok.argv[1]);
-        struct job_t *pjob = getjobid(job_list, id);
-        if (pjob && pjob->state == FG) {
-            sprintf(err_msg, "-tsh: fg: job %d already in foreground", id);
-            app_error(err_msg);
-        } else if (pjob) {
-            fgJob(pjob);
-        } else {
-            sprintf(err_msg, "-tsh: fg: %d: no such job", id);
-            app_error(err_msg);
+        if (infd != -1) {
+            close(infd);
+            dup2(stdin_copy, 0);
+        }
+        if (outfd != -1) {
+            close(outfd);
+            dup2(stdout_copy, 1);
         }
     }
 
@@ -467,18 +508,22 @@ sigchld_handler(int sig) {
     int status;
     while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED)) > 0) {
         if (WIFEXITED(status)) {
-            // printf("terminated normaly\n");
+            if (verbose) printf("terminated normaly\n");
             deletejob(job_list, pid);
         } else if (WIFSIGNALED(status)) {
-            // printf("terminated by signal\n");
+            if (verbose) printf("terminated by signal\n");
+            struct job_t *job = getjobpid(job_list, pid);
+            fprintf(stdout, terminated_by_signal, job->jid, job->pid, WTERMSIG(status));
             deletejob(job_list,pid);
         } else if (WIFSTOPPED(status)) {
-            // printf("stopped thread\n");
-            struct job_t *pjob = getjobpid(job_list, pid);
-            pjob->state = BG; // modify it to become a background job
+            if (verbose) printf("stopped thread\n");
+            struct job_t *job = getjobpid(job_list, pid);
+            job->state = ST; // modify it to become a stopped job
+            fprintf(stdout, stopped_by_signal, job->jid, job->pid, WSTOPSIG(status));
         } else {
             printf("Unhandled status: %d\n", status);
         }
+        fflush(stdout);
     }
     if (errno != ECHILD) {
         // TODO: print error message
@@ -511,7 +556,6 @@ sigint_handler(int sig)
 void 
 sigtstp_handler(int sig) 
 {
-    printf("sigtstp handler\n");
     pid_t pid = fgpid(job_list);
     if (pid > 0) {
         // printf("%d\n", pid);
@@ -655,12 +699,21 @@ struct job_t *getjobjid(struct job_t *job_list, int jid)
 /* getjobid  - Find a job (by id) on the job list.
  * id:  the id can either be a pid or jid. Return the first matched
  */
-struct job_t *getjobid(struct job_t *job_list, pid_t id)
+struct job_t *getjobid(struct job_t *job_list, char *id)
 {
-    // first try pid
-    struct job_t *pjob = getjobpid(job_list, id);
-    if (pjob) return pjob;
-    return getjobjid(job_list, (int)id);
+    int len = strlen(id);
+    if (len <= 1) {
+        app_error("INRECOGNIZED bg/fg id");
+    }
+    struct job_t *pjob;
+    if (id[0] == '%') {
+        int jid = atoi(&id[1]);
+        pjob = getjobjid(job_list, jid);
+    } else {
+        pid_t pid = atoi(id);
+        pjob = getjobpid(job_list, pid);
+    }
+    return pjob;
 }
 
 /* pid2jid - Map process ID to job ID */
@@ -722,19 +775,8 @@ listjobs(struct job_t *job_list, int output_fd)
     }
 }
 
-/* bgJob  - take the foreground job to background */
-void bgJob(struct job_t *job) {
-    if (kill(job->pid, SIGTSTP) != 0) {
-        app_error("sigtstp failed");
-    }
-}
-
-/* fgJob  - take the background job to foreground */
-
-void fgJob(struct job_t *job) {
-    // block the signal in case job->state
-    // is modified before we modify it now.
-    printf("fgjob: %d\n", job->pid);
+/* bgJob  - restart the stopped job to background */
+void bgJob(struct job_t *job, const char *cmdline) {
     sigset_t mask, oldmask;
     sigemptyset(&mask);
     sigaddset(&mask, SIGINT);
@@ -744,15 +786,44 @@ void fgJob(struct job_t *job) {
     if (kill(job->pid, SIGCONT) != 0) {
         app_error("sigcont failed");
     } else {
-        printf("sigcont succeed\n");
-        // succeed. Change state
-        job->state = FG;
-        sigsuspend(&oldmask); // wait until sigchld_handler return
-        sigsuspend(&oldmask); // block current process
+        job->state = BG;
+        fprintf(stdout, bg_notify, job->jid, job->pid, job->cmdline);
         sigprocmask(SIG_UNBLOCK, &mask, NULL);
     }
 }
 
+/* fgJob  - restart the stopped job in foreground */
+void fgJob(struct job_t *job) {
+    // block the signal in case job->state
+    // is modified before we modify it now.
+    // printf("fgjob: %d\n", job->pid);
+    sigset_t mask, oldmask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGTSTP);
+    sigaddset(&mask, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &mask, &oldmask);
+    if (kill(job->pid, SIGCONT) != 0) {
+        app_error("sigcont failed");
+    } else {
+        // printf("sigcont succeed\n");
+        // succeed. Change state
+        job->state = FG;
+        waitfg(&oldmask);
+        sigprocmask(SIG_UNBLOCK, &mask, NULL);
+    }
+}
+
+/* waitfg - wait until foreground jobs finished
+ * mask: the set of signals we want to block when waiting
+ */
+void waitfg(sigset_t *mask) {
+    pid_t pid;
+    // while exist a front end job, we wait
+    while ((pid=fgpid(job_list))) {
+        sigsuspend(mask);
+    }
+}
 
 
 /******************************
