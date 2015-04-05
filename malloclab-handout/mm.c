@@ -40,6 +40,7 @@
 #define DSIZE 8
 #define ALIGNMENT 8
 #define CHUNKSIZE (1<<12)
+#define MIN_BLOCK_SIZE DSIZE
 
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(p) (((size_t)(p) + (ALIGNMENT-1)) & ~0x7)
@@ -61,13 +62,19 @@
 #define BEGIN_BLOCK NEXT_BLKP(heap_listp)
 
 /* bp points to epilogue block */
-#define IS_EPILOGUE(bp) (GET(bp) == 1)
+#define IS_EPILOGUE(bp) (GET(HDRP(bp)) == 1)
+#define IS_FREE(bp) (GET_ALLOC(HDRP(bp)) == 0)
+
+/* iterate through every block between epilogue and prologue block */
+#define for_each_block(ptr) \
+    for ((ptr) = BEGIN_BLOCK; !IS_EPILOGUE(ptr); (ptr)=NEXT_BLKP(ptr))
 
 static char *heap_listp;
 static void *extend_heap(size_t words);
 static void *coalesce(void *bp);
 static void place(void *bp, size_t size);
 static void *find_fit(size_t size);
+static int aligned(const void *p);
 
 /*
  * Initialize: return -1 on error, 0 on success.
@@ -106,15 +113,6 @@ static void *extend_heap(size_t words)
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
 
     return coalesce(bp);
-}
-
-
-void mm_free(void *bp)
-{
-    size_t size = GET_SIZE(HDRP(bp));
-    PUT(HDRP(bp), PACK(size, 0));
-    PUT(FTRP(bp), PACK(size, 0));
-    coalesce(bp);
 }
 
 
@@ -169,7 +167,6 @@ void *malloc (size_t size) {
     if ((bp = extend_heap(extendsize / WSIZE)) == NULL) {
         return NULL;
     }
-
     place(bp, asize);
     return bp;
 }
@@ -179,8 +176,16 @@ void *malloc (size_t size) {
  */
 static void place(void *bp, size_t size)
 {
+    size_t total_block_size = GET_SIZE(HDRP(bp));
     PUT(HDRP(bp), PACK(size, 1));
     PUT(FTRP(bp), PACK(size, 1));
+    // TODO: possible to create empty free blocks, which is useless
+    if (total_block_size > size) {
+        size_t rest_block_size = total_block_size - size;
+        void *next_bp = NEXT_BLKP(bp);
+        PUT(HDRP(next_bp), PACK(rest_block_size, 0));
+        PUT(FTRP(next_bp), PACK(rest_block_size, 0));
+    }
 }
 
 /*
@@ -188,8 +193,8 @@ static void place(void *bp, size_t size)
  */
 static void *find_fit(size_t size)
 {
-    void *bp = BEGIN_BLOCK;
-    while (!IS_EPILOGUE(bp)) {
+    char *bp;
+    for_each_block(bp) {
         size_t alloc = GET_ALLOC(HDRP(bp));
         size_t size_of_bp = GET_SIZE(HDRP(bp));
         if (!alloc && size_of_bp >= size) return bp;
@@ -275,9 +280,75 @@ static int aligned(const void *p) {
     return (size_t)ALIGN(p) == (size_t)p;
 }
 
+
+/* Simple check */
+
+#define err_report(lineno, msg)  \
+    fprintf(stderr, "[CHECK FAIL] LINE: %d ; %s \n", (lineno), (msg)); \
+    exit(-1);
+    
+
+#define CHECK_EQUAL(v1, v2, lineno, msg) if ((v1) != (v2)) {\
+    err_report(lineno, msg); \
+}
+
+#define CHECK_TRUE(v, lineno, msg) if (!(v)) {\
+    err_report(lineno, msg); \
+}
+
+#define CHECK_FALSE(v, lineno, msg) if (v) {\
+    err_report(lineno, msg); \
+}
+
+#define CHECK_GREATER_EQUAL(v, cmp_v, lineno, msg) if (!((v) >= (cmp_v))) {\
+  err_report(lineno, msg); \
+}
+
+
+
+static void check_block_consistency(const char *bp, int lineno)
+{
+    const char *header, *footer;
+    header = HDRP(bp);
+    footer = FTRP(bp);
+    CHECK_EQUAL(GET_SIZE(header), GET_SIZE(footer), lineno, "check header/footer size");
+    CHECK_EQUAL(GET_ALLOC(header), GET_ALLOC(footer), lineno, "check header/footer alloc");
+    CHECK_GREATER_EQUAL(GET_SIZE(header), MIN_BLOCK_SIZE, lineno, "check minimum block size");
+}
+
+static void check_coalescing(const char *bp, int lineno)
+{
+    if (IS_FREE(bp)) {
+        CHECK_EQUAL(GET_ALLOC(HDRP(NEXT_BLKP(bp))), 1, lineno, "next block is free");
+        CHECK_EQUAL(GET_ALLOC(HDRP(PREV_BLKP(bp))), 1, lineno, "prev block is free");
+    }
+}
+
 /*
  * mm_checkheap
  */
 void mm_checkheap(int lineno) {
-    lineno = lineno;
+    char *bp;
+    /* check prologue content */
+
+    CHECK_EQUAL(GET(HDRP(heap_listp)), PACK(8,1), lineno, "check prologue header content");
+    CHECK_EQUAL(GET(FTRP(heap_listp)), PACK(8,1), lineno, "check prologue footer content");
+
+
+    /* check block consistency */
+
+    CHECK_TRUE(aligned(heap_listp), lineno, "check prologue aligned");
+    CHECK_TRUE(in_heap(heap_listp), lineno, "check prologue in heap");
+
+    for_each_block(bp) {
+        CHECK_TRUE(aligned(bp), lineno, "check block aligned");
+        CHECK_TRUE(in_heap(bp), lineno, "check block in heap");
+        check_block_consistency(bp, lineno);
+        check_coalescing(bp, lineno);
+    }
+
+    /* after forEach Iteration, bp points to epilogue block */
+    CHECK_TRUE(aligned(bp), lineno, "check epilogue aligned");
+    CHECK_FALSE(in_heap(bp), lineno, "check epilogue in heap");
+    CHECK_EQUAL(GET(HDRP(bp)), 1, lineno, "check epilogue header");
 }
