@@ -53,7 +53,11 @@
 #define GET(p)  (*(unsigned int*)(p))
 #define PUT(p, val) (*(unsigned int *)(p) = (val))
 
+/* GET_SIZE return the whole size(including header/footer) of the block */
 #define GET_SIZE(p) (GET(p) & ~0x7)
+/* GET_USABLE_SIZE return the real size to store content(excluding header/footer)
+ * */
+#define GET_USABLE_SIZE(p) (GET_SIZE(p)-DSIZE)
 #define GET_ALLOC(p) (GET(p) & 0x1)
 /* get offset of this ptr */
 #define GET_OFFSET(p) ((char *)(p) - free_listp)
@@ -72,7 +76,6 @@
 #define SUCC_BLKP(bp) (free_listp + GET(SUCC(bp)))
 
 #define BEGIN_BLOCK NEXT_BLKP(heap_listp)
-#define BEGIN_FREE_BLOCK(class_ptr) (free_listp + GET(class_ptr))
 #define END_CLASS_PTR (free_listp + FREE_LIST_LEN * FREE_LIST_SENTINEL_SIZE)
 
 /* bp points to epilogue block */
@@ -87,10 +90,11 @@
 #define for_each_block(ptr) \
     for ((ptr) = BEGIN_BLOCK; !IS_EPILOGUE(ptr); (ptr)=NEXT_BLKP(ptr))
 #define for_each_free_block(class_ptr, ptr) \
-    for ((ptr) = BEGIN_FREE_BLOCK(class_ptr); (ptr) != (class_ptr); (ptr) = SUCC_BLKP(ptr))
+    for ((ptr) = SUCC_BLKP(class_ptr); (ptr) != (class_ptr); (ptr) = SUCC_BLKP(ptr))
 /* enumerate free list in range */
 #define for_range_free_list(begin_ptr, end_ptr, ptr) \
-    for ((ptr) = (begin_ptr); (ptr) != (end_ptr); (ptr) = SUCC_BLKP(ptr))
+    for ((ptr) = (begin_ptr); (ptr) != (end_ptr);\
+            (ptr) = (char*)(ptr) + FREE_LIST_SENTINEL_SIZE)
 /* enumerate all free lists */
 #define for_each_free_list(ptr) \
     for_range_free_list(free_listp, END_CLASS_PTR, (ptr))
@@ -110,7 +114,10 @@ static void *split_block(void *bp, size_t pack_v1, size_t pack_v2);
 #define FREE_LIST_SENTINEL_SIZE DSIZE
 // get the ith free list
 #define FREE_LIST_REF(k) (free_listp + (k) * FREE_LIST_SENTINEL_SIZE)
-/* get free list class ptr */
+#define FREE_LIST_IDX(p) (((char*)p - free_listp) / FREE_LIST_SENTINEL_SIZE)
+/* get free list class ptr
+ * size: usable size of the free block
+ * */
 inline static void *get_class_ptr(size_t size)
 {
     /*
@@ -124,7 +131,7 @@ inline static void *get_class_ptr(size_t size)
     } else if (size > 4096) {
         offset = FREE_LIST_LEN-1;
     } else {
-        offset = 30 - __builtin_clz(size-1);
+        offset = 31 - __builtin_clz(size-1);
     }
     return FREE_LIST_REF(offset);
 }
@@ -134,9 +141,10 @@ inline static void *get_class_ptr(size_t size)
  */
 inline static void append_free_block(void *bp)
 {
-    // block size should exlude the header/footer size
-    size_t block_size = GET_SIZE(HDRP(bp)) - DSIZE;
-    void *class_ptr = get_class_ptr(block_size);
+    // usable block size should exlude the header/footer size
+    size_t usable_size = GET_USABLE_SIZE(HDRP(bp));
+    printf("append_free_block: %zu\n", usable_size);
+    void *class_ptr = get_class_ptr(usable_size);
     void *tail_bp = PRED_BLKP(class_ptr);
 
     // insert_free_block(tail_bp, bp);
@@ -228,6 +236,7 @@ static void *extend_heap(size_t words)
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
 
     bp = coalesce(bp);
+    printf("extend heap, %u\n", GET_SIZE(HDRP(bp)));
     append_free_block(bp);
     return bp;
 }
@@ -265,6 +274,7 @@ static void *coalesce(void *bp)
  */
 void *malloc (size_t size)
 {
+    printf("malloc: %zu\n",size);
     size_t asize;
     char *bp;
     size_t extendsize;
@@ -296,9 +306,9 @@ void *malloc (size_t size)
  */
 static void place(void *bp, size_t size)
 {
-    size_t total_block_size = GET_SIZE(HDRP(bp));
+    size_t total_size = GET_SIZE(HDRP(bp));
     remove_free_block(bp);
-    if (total_block_size >= size + MIN_FREE_BLOCK_SIZE) {
+    if (total_size >= size + MIN_FREE_BLOCK_SIZE) {
         /*
          * split the blocks into an allocated block
          * and a free block
@@ -306,12 +316,12 @@ static void place(void *bp, size_t size)
         void *free_bp = split_block(
                 bp,
                 PACK(size, 1), // allocated block
-                PACK(total_block_size - size, 0) // free block
+                PACK(total_size - size, 0) // free block
                 );
         append_free_block(free_bp);
     } else {
-        PUT(HDRP(bp), PACK(total_block_size, 1));
-        PUT(FTRP(bp), PACK(total_block_size, 1));
+        PUT(HDRP(bp), PACK(total_size, 1));
+        PUT(FTRP(bp), PACK(total_size, 1));
     }
 }
 
@@ -599,6 +609,28 @@ static void get_class_size_range(void *class_ptr, size_t *pmin_size, size_t *pma
     }
 }
 
+/* test code */
+#if 0
+static void test_class_ptr()
+{
+    for (int i = 0; i < FREE_LIST_LEN; i++) {
+        void *class_ptr = FREE_LIST_REF(i);
+        size_t min_size, max_size;
+        get_class_size_range(class_ptr, &min_size, &max_size);
+        printf("%zu %zu\n", min_size, max_size);
+    }
+
+    for (size_t i = 1; i <= 4097; i++) {
+        void *class_ptr = get_class_ptr(i);
+        int offset = ((char *)class_ptr - free_listp) / FREE_LIST_SENTINEL_SIZE;
+        size_t min_size, max_size;
+        get_class_size_range(FREE_LIST_REF(offset), &min_size, &max_size);
+        CHECK_LESS_EQUAL(i, max_size, __LINE__, "max size");
+        CHECK_GREATER_EQUAL(i, min_size, __LINE__, "min_size");
+    }
+}
+#endif
+
 /*
  * mm_checkheap
  */
@@ -608,7 +640,8 @@ void mm_checkheap(int lineno)
     size_t free_block_count_in_free_list;
     size_t free_block_count;
     /* free list block size range for each class*/
-    size_t min_size, max_size;
+    size_t min_class_size;
+    size_t max_class_size;
     /* check prologue content */
 
     CHECK_EQUAL(GET(HDRP(heap_listp)), PACK(8,1), lineno, "check prologue header content");
@@ -639,7 +672,7 @@ void mm_checkheap(int lineno)
     
     free_block_count_in_free_list = 0;
     for_each_free_list(class_ptr) {
-        get_class_size_range(class_ptr, &min_size, &max_size);
+        get_class_size_range(class_ptr, &min_class_size, &max_class_size);
         for_each_free_block(class_ptr, bp) {
             free_block_count_in_free_list += 1;
             CHECK_EQUAL(SUCC_BLKP(PRED_BLKP(bp)),
@@ -653,9 +686,10 @@ void mm_checkheap(int lineno)
             CHECK_TRUE(IS_FREE(bp), lineno, "free blocks should contain\
                     only free pointers");
             CHECK_TRUE(in_heap(bp), lineno, "free blocks in heap");
-            CHECK_LESS_EQUAL(GET_SIZE(HDRP(bp)), max_size, lineno,
+            printf("%d %zu %zu %zu\n", (int)FREE_LIST_IDX(class_ptr), (size_t)GET_USABLE_SIZE(HDRP(bp)), min_class_size, max_class_size);
+            CHECK_LESS_EQUAL(GET_USABLE_SIZE(HDRP(bp)), max_class_size, lineno,
                     "free block size in class range(max size)");
-            CHECK_GREATER_EQUAL(GET_SIZE(HDRP(bp)), min_size, lineno,
+            CHECK_GREATER_EQUAL(GET_USABLE_SIZE(HDRP(bp)), min_class_size, lineno,
                     "free block size in class range(min size)");
 
         }
