@@ -40,7 +40,9 @@
 #define DSIZE 8
 #define ALIGNMENT 8
 #define CHUNKSIZE (1<<12)
-#define MIN_BLOCK_SIZE DSIZE
+#define MIN_FREE_BLOCK_SIZE (2*DSIZE)
+#define MIN_BLOCK_SIZE (2*DSIZE)
+#define MAX_BLOCK_SIZE ((1<<31)-1)
 
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(p) (((size_t)(p) + (ALIGNMENT-1)) & ~0x7)
@@ -52,38 +54,150 @@
 
 #define GET_SIZE(p) (GET(p) & ~0x7)
 #define GET_ALLOC(p) (GET(p) & 0x1)
+/* get offset of this ptr */
+#define GET_OFFSET(p) ((char *)(p) - free_listp)
 
 #define HDRP(bp) ((char *)(bp) - WSIZE)
 #define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
+#define PRED(bp) (bp)
+#define SUCC(bp) ((char *)(bp) + WSIZE)
 
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
+/*
+ * Note PRED_BLKP/SUCC_BLKP may return the free list ptr.
+ */
+#define PRED_BLKP(bp) (free_listp + GET(PRED(bp)))
+#define SUCC_BLKP(bp) (free_listp + GET(SUCC(bp)))
 
 #define BEGIN_BLOCK NEXT_BLKP(heap_listp)
+#define BEGIN_FREE_BLOCK(class_ptr) (free_listp + GET(class_ptr))
+#define END_CLASS_PTR (free_listp + FREE_LIST_LEN * FREE_LIST_SENTINEL_SIZE)
 
 /* bp points to epilogue block */
 #define IS_EPILOGUE(bp) (GET(HDRP(bp)) == 1)
 #define IS_FREE(bp) (GET_ALLOC(HDRP(bp)) == 0)
 
+/*
+ * for loops
+ */
+
 /* iterate through every block between epilogue and prologue block */
 #define for_each_block(ptr) \
     for ((ptr) = BEGIN_BLOCK; !IS_EPILOGUE(ptr); (ptr)=NEXT_BLKP(ptr))
+#define for_each_free_block(class_ptr, ptr) \
+    for ((ptr) = BEGIN_FREE_BLOCK(class_ptr); (ptr) != (class_ptr); (ptr) = SUCC_BLKP(ptr))
+/* enumerate free list in range */
+#define for_range_free_list(begin_ptr, end_ptr, ptr) \
+    for ((ptr) = (begin_ptr); (ptr) != (end_ptr); (ptr) = SUCC_BLKP(ptr))
+/* enumerate all free lists */
+#define for_each_free_list(ptr) \
+    for_range_free_list(free_listp, END_CLASS_PTR, (ptr))
 
-static char *heap_listp;
+static char *heap_listp;  // point to the first block
+static char *free_listp;  // pointer to free list
 static void *extend_heap(size_t words);
 static void *coalesce(void *bp);
 static void place(void *bp, size_t size);
 static void *find_fit(size_t size);
-static int aligned(const void *p);
+static void *split_block(void *bp, size_t pack_v1, size_t pack_v2);
+
+
+/* segregated free list */
+#define FREE_LIST_LEN 13
+/* sentinel size(PREV | SUCC) */
+#define FREE_LIST_SENTINEL_SIZE DSIZE
+// get the ith free list
+#define FREE_LIST_REF(k) (free_listp + (k) * FREE_LIST_SENTINEL_SIZE)
+/* get free list class ptr */
+inline static void *get_class_ptr(size_t size)
+{
+    /*
+     * {1-2},{3-4}, {5-8}, ..., {2049 - 4096}, {4097 - +inf}
+     * 2^1, 2^2, 2^3, ...., 2^12, ...
+     */
+
+    size_t offset;
+    if (size == 1) {
+        offset = 0;
+    } else if (size > 4096) {
+        offset = FREE_LIST_LEN-1;
+    } else {
+        offset = 30 - __builtin_clz(size-1);
+    }
+    return FREE_LIST_REF(offset);
+}
+
+/*
+ *  append free block to the tail of free list
+ */
+inline static void append_free_block(void *bp)
+{
+    // block size should exlude the header/footer size
+    size_t block_size = GET_SIZE(HDRP(bp)) - DSIZE;
+    void *class_ptr = get_class_ptr(block_size);
+    void *tail_bp = PRED_BLKP(class_ptr);
+
+    // insert_free_block(tail_bp, bp);
+    PUT(SUCC(bp), GET(SUCC(tail_bp)));
+    PUT(PRED(bp), GET_OFFSET(tail_bp));
+    PUT(SUCC(tail_bp), GET_OFFSET(bp));
+    PUT(PRED(class_ptr), GET_OFFSET(bp));
+}
+
+/*
+ * insert free block bp after prev_bp
+ */
+inline static void insert_free_block(void *prev_bp, void *bp)
+{
+    void *succ_bp = SUCC_BLKP(prev_bp);
+    PUT(SUCC(bp), GET(SUCC(prev_bp)));
+    PUT(PRED(bp), GET_OFFSET(prev_bp));
+    PUT(SUCC(prev_bp), GET_OFFSET(bp));
+    PUT(PRED(succ_bp), GET_OFFSET(bp));
+}
+
+/*
+ * remove free block from free list
+ * assert bp is not a class_ptr
+ */
+inline static void remove_free_block(char *bp)
+{
+    char *pred_bp = PRED_BLKP(bp),
+         *succ_bp = SUCC_BLKP(bp);
+    PUT(SUCC(pred_bp), GET_OFFSET(succ_bp));
+    PUT(PRED(succ_bp), GET_OFFSET(pred_bp));
+}
+
+
 
 /*
  * Initialize: return -1 on error, 0 on success.
  */
 int mm_init(void) {
-    // initial empty heap
+    int i;
+    /* This part is tricky.
+     * FREE_LIST_LEN is odd number.
+     */
+    if ((free_listp = mem_sbrk(FREE_LIST_LEN*FREE_LIST_SENTINEL_SIZE)) == (void*)-1) {
+        return -1;
+    }
+
+    /*
+     * odd + 3 is even
+     */
     if ((heap_listp = mem_sbrk(4*WSIZE)) == (void*) - 1) {
         return -1;
     }
+
+    // initialize free list
+    for (i = 0; i < FREE_LIST_LEN; i++) {
+        PUT(PRED(FREE_LIST_REF(i)), i * FREE_LIST_SENTINEL_SIZE);
+        PUT(SUCC(FREE_LIST_REF(i)), i * FREE_LIST_SENTINEL_SIZE);
+    }
+
+
+    // initialize prologue
     PUT(heap_listp, 0);
     PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));
     PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
@@ -112,7 +226,9 @@ static void *extend_heap(size_t words)
     // HDRP(NEXT_BLKP(bp)) points to the new epilogue header
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
 
-    return coalesce(bp);
+    bp = coalesce(bp);
+    append_free_block(bp);
+    return bp;
 }
 
 
@@ -146,7 +262,8 @@ static void *coalesce(void *bp)
 /*
  * malloc
  */
-void *malloc (size_t size) {
+void *malloc (size_t size)
+{
     size_t asize;
     char *bp;
     size_t extendsize;
@@ -171,21 +288,49 @@ void *malloc (size_t size) {
     return bp;
 }
 
+
+
 /*
  * allocate memory on the free block
  */
 static void place(void *bp, size_t size)
 {
     size_t total_block_size = GET_SIZE(HDRP(bp));
-    PUT(HDRP(bp), PACK(size, 1));
-    PUT(FTRP(bp), PACK(size, 1));
-    // TODO: possible to create empty free blocks, which is useless
-    if (total_block_size > size) {
-        size_t rest_block_size = total_block_size - size;
-        void *next_bp = NEXT_BLKP(bp);
-        PUT(HDRP(next_bp), PACK(rest_block_size, 0));
-        PUT(FTRP(next_bp), PACK(rest_block_size, 0));
+    remove_free_block(bp);
+    if (total_block_size >= size + MIN_FREE_BLOCK_SIZE) {
+        /*
+         * split the blocks into an allocated block
+         * and a free block
+         */
+        void *free_bp = split_block(
+                bp,
+                PACK(size, 1), // allocated block
+                PACK(total_block_size - size, 0) // free block
+                );
+        append_free_block(free_bp);
+    } else {
+        PUT(HDRP(bp), PACK(total_block_size, 1));
+        PUT(FTRP(bp), PACK(total_block_size, 1));
     }
+}
+
+/* split the block into two blocks
+ * assert the two blocks are not both free.
+ * assert GET_SIZE(pack_v1) + GET_SIZE(pack_v2) = GET_SIZE(bp)
+ * return the ptr of newly created block
+ */
+static void *split_block(
+        void *bp,
+        size_t pack_v1,
+        size_t pack_v2) {
+    // TODO: check pack_v1 and pack_v2
+    void *next_bp;
+    PUT(HDRP(bp), pack_v1);
+    PUT(FTRP(bp), pack_v1);
+    next_bp = NEXT_BLKP(bp);
+    PUT(HDRP(next_bp), pack_v2);
+    PUT(FTRP(next_bp), pack_v2);
+    return next_bp;
 }
 
 /*
@@ -193,11 +338,16 @@ static void place(void *bp, size_t size)
  */
 static void *find_fit(size_t size)
 {
-    char *bp;
-    for_each_block(bp) {
-        size_t alloc = GET_ALLOC(HDRP(bp));
-        size_t size_of_bp = GET_SIZE(HDRP(bp));
-        if (!alloc && size_of_bp >= size) return bp;
+    // first fit
+    void *begin_class_ptr = get_class_ptr(size);
+    void *class_ptr;
+    void *bp;
+    for_range_free_list(begin_class_ptr, END_CLASS_PTR, class_ptr) {
+        for_each_free_block(class_ptr, bp) {
+            size_t alloc = GET_ALLOC(HDRP(bp));
+            size_t size_of_bp = GET_SIZE(HDRP(bp));
+            if (!alloc && size_of_bp >= size) return bp;
+        }
     }
     return NULL;
 }
@@ -205,18 +355,22 @@ static void *find_fit(size_t size)
 /*
  * free
  */
-void free (void *ptr) {
+void free (void *ptr)
+{
     if(!ptr) return;
     size_t size = GET_SIZE(HDRP(ptr));
     PUT(HDRP(ptr), PACK(size, 0));
     PUT(FTRP(ptr), PACK(size, 0));
-    coalesce(ptr);
+    ptr = coalesce(ptr);
+    append_free_block(ptr);
 }
 
 /*
  * realloc - you may want to look at mm-naive.c
+ * highly optimized version of realloc. may contain bugs.
  */
-void *realloc(void *oldptr, size_t size) {
+void *realloc1(void *oldptr, size_t size)
+{
     size_t oldsize;
     void *newptr;
 
@@ -231,22 +385,114 @@ void *realloc(void *oldptr, size_t size) {
         return malloc(size);
     }
 
-    newptr = malloc(size);
-
-    /* If realloc() fails the original block is left untouched  */
-    if(!newptr) {
-        return 0;
-    }
-
-    /* Copy the old data. */
     oldsize = GET_SIZE(HDRP(oldptr));
-    if(size < oldsize) oldsize = size;
-    memcpy(newptr, oldptr, oldsize);
 
-    /* Free the old block. */
+    /*
+     * Basic idea:
+     * 1. if the size we want is smaller, then we don't need reallocate.
+     *    But we need to split the old block if necessary
+     * 2. check whether there is a free block next to the old block.
+     *    If the free block is large enough, we directly use it. Split
+     *    the free block if necessary.
+     * 3. Otherwise, we allocate a new block
+     */
+
+    if (size <= oldsize) {
+        if (size + MIN_FREE_BLOCK_SIZE <= oldsize) {
+            // split block
+            void *free_block =
+                split_block(oldptr,
+                        PACK(size, 1),
+                        PACK(oldsize-size, 0));
+            free_block = coalesce(free_block);
+            append_free_block(free_block);
+        } else {
+            return oldptr;
+        }
+    } else {
+        // check whether the block next to current block is free and the size
+        // is large enough
+        void *next_block = NEXT_BLKP(oldptr);
+        size_t next_block_size = GET_SIZE(HDRP(next_block));
+        if (IS_FREE(next_block) && next_block_size + oldsize >= size) {
+            remove_free_block(next_block);
+            if (next_block_size + oldsize >= size + MIN_FREE_BLOCK_SIZE) {
+                // split the next block
+                size_t second_block_size = next_block_size + oldsize - size;
+                size_t first_block_size = next_block_size - second_block_size;
+                void *free_block =
+                    split_block(next_block,
+                            PACK(first_block_size, 1),
+                            PACK(second_block_size, 0));
+                append_free_block(free_block);
+                // change the size of the new block
+                PUT(HDRP(oldptr), PACK(size, 1));
+                PUT(FTRP(oldptr), PACK(size, 1));
+            } else {
+                size = oldsize + next_block_size;
+                // directly use the next free block
+                PUT(HDRP(oldptr), PACK(size, 1));
+                PUT(FTRP(oldptr), PACK(size, 1));
+            }
+            return oldptr;
+        } else {
+            // allocate a new block
+            newptr = malloc(size);
+            /* If realloc() fails the original block is left untouched  */
+            if (!newptr) {
+                return 0;
+            }
+            /* Copy the old data. */
+            oldsize = GET_SIZE(HDRP(oldptr));
+            if(size < oldsize) oldsize = size;
+            memcpy(newptr, oldptr, oldsize);
+
+            /* Free the old block. */
+            free(oldptr);
+
+            return newptr;
+        }
+    }
+    return NULL; // make compiler happy
+}
+
+/*
+ * realloc - Change the size of the block by mallocing a new block,
+ *      copying its data, and freeing the old block.  I'm too lazy
+ *      to do better.
+ */
+void *realloc(void *oldptr, size_t size)
+{
+  size_t oldsize;
+  void *newptr;
+
+  /* If size == 0 then this is just free, and we return NULL. */
+  if(size == 0) {
     free(oldptr);
+    return 0;
+  }
 
-    return newptr;
+  /* If oldptr is NULL, then this is just malloc. */
+  if(oldptr == NULL) {
+    return malloc(size);
+  }
+
+  newptr = malloc(size);
+
+  /* If realloc() fails the original block is left untouched  */
+  if(!newptr) {
+    return 0;
+  }
+
+  /* Copy the old data. */
+  oldsize = GET_SIZE(HDRP(oldptr));
+  if(size < oldsize) oldsize = size;
+  memcpy(newptr, oldptr, oldsize);
+
+  /* Free the old block. */
+  free(oldptr);
+
+  return newptr;
 }
 
 /*
@@ -254,7 +500,8 @@ void *realloc(void *oldptr, size_t size) {
  * This function is not tested by mdriver, but it is
  * needed to run the traces.
  */
-void *calloc (size_t nmemb, size_t size) {
+void *calloc (size_t nmemb, size_t size)
+{
     size_t bytes = nmemb * size;
     void *newptr;
 
@@ -304,6 +551,9 @@ static int aligned(const void *p) {
   err_report(lineno, msg); \
 }
 
+#define CHECK_LESS_EQUAL(v, cmp_v, lineno, msg) if (!((v) <= (cmp_v))) {\
+  err_report(lineno, msg); \
+}
 
 
 static void check_block_consistency(const char *bp, int lineno)
@@ -314,6 +564,10 @@ static void check_block_consistency(const char *bp, int lineno)
     CHECK_EQUAL(GET_SIZE(header), GET_SIZE(footer), lineno, "check header/footer size");
     CHECK_EQUAL(GET_ALLOC(header), GET_ALLOC(footer), lineno, "check header/footer alloc");
     CHECK_GREATER_EQUAL(GET_SIZE(header), MIN_BLOCK_SIZE, lineno, "check minimum block size");
+    if (IS_FREE(bp)) {
+        CHECK_GREATER_EQUAL(GET_SIZE(header), MIN_FREE_BLOCK_SIZE, lineno,
+                "check minimum free block size");
+    }
 }
 
 static void check_coalescing(const char *bp, int lineno)
@@ -324,11 +578,36 @@ static void check_coalescing(const char *bp, int lineno)
     }
 }
 
+
+/*
+ * return the size for this class
+ * This function is for debugging usage.
+ */
+static void get_class_size_range(void *class_ptr, size_t *pmin_size, size_t *pmax_size)
+{
+    size_t ref_offset = ((char *)class_ptr - (char *)free_listp) / FREE_LIST_SENTINEL_SIZE;
+    if (ref_offset == 0) {
+        *pmin_size = 1;
+        *pmax_size = 2;
+    } else if (ref_offset == FREE_LIST_LEN - 1) {
+        *pmin_size = 4097;
+        *pmax_size = MAX_BLOCK_SIZE;
+    } else {
+        *pmin_size = (1<<ref_offset)+1;
+        *pmax_size = (1<<(1+ref_offset));
+    }
+}
+
 /*
  * mm_checkheap
  */
-void mm_checkheap(int lineno) {
-    char *bp;
+void mm_checkheap(int lineno)
+{
+    char *bp, *class_ptr;
+    size_t free_block_count_in_free_list;
+    size_t free_block_count;
+    /* free list block size range for each class*/
+    size_t min_size, max_size;
     /* check prologue content */
 
     CHECK_EQUAL(GET(HDRP(heap_listp)), PACK(8,1), lineno, "check prologue header content");
@@ -340,15 +619,46 @@ void mm_checkheap(int lineno) {
     CHECK_TRUE(aligned(heap_listp), lineno, "check prologue aligned");
     CHECK_TRUE(in_heap(heap_listp), lineno, "check prologue in heap");
 
+    free_block_count = 0;
     for_each_block(bp) {
         CHECK_TRUE(aligned(bp), lineno, "check block aligned");
         CHECK_TRUE(in_heap(bp), lineno, "check block in heap");
         check_block_consistency(bp, lineno);
         check_coalescing(bp, lineno);
+        if (IS_FREE(bp)) free_block_count += 1;
     }
 
     /* after forEach Iteration, bp points to epilogue block */
     CHECK_TRUE(aligned(bp), lineno, "check epilogue aligned");
     CHECK_FALSE(in_heap(bp), lineno, "check epilogue in heap");
     CHECK_EQUAL(GET(HDRP(bp)), 1, lineno, "check epilogue header");
+
+
+    /* check free list */
+    
+    free_block_count_in_free_list = 0;
+    for_each_free_list(class_ptr) {
+        get_class_size_range(class_ptr, &min_size, &max_size);
+        for_each_free_block(class_ptr, bp) {
+            free_block_count_in_free_list += 1;
+            CHECK_EQUAL(SUCC_BLKP(PRED_BLKP(bp)),
+                    bp,
+                    lineno,
+                    "A's previous's next points to A");
+            CHECK_EQUAL(PRED_BLKP(SUCC_BLKP(bp)),
+                    bp,
+                    lineno,
+                    "A's next's previous points back to A");
+            CHECK_TRUE(IS_FREE(bp), lineno, "free blocks should contain\
+                    only free pointers");
+            CHECK_TRUE(in_heap(bp), lineno, "free blocks in heap");
+            CHECK_LESS_EQUAL(GET_SIZE(HDRP(bp)), max_size, lineno,
+                    "free block size in class range(max size)");
+            CHECK_GREATER_EQUAL(GET_SIZE(HDRP(bp)), min_size, lineno,
+                    "free block size in class range(min size)");
+
+        }
+    }
+
+    CHECK_EQUAL(free_block_count, free_block_count_in_free_list, lineno, "free block count consistency");
 }
