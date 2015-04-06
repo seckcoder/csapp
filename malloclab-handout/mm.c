@@ -57,7 +57,7 @@
 #define GET_SIZE(p) (GET(p) & ~0x7)
 /* GET_USABLE_SIZE return the real size to store content(excluding header/footer)
  * */
-#define GET_USABLE_SIZE(p) (GET_SIZE(p)-DSIZE)
+// #define GET_USABLE_SIZE(p) (GET_SIZE(p)-DSIZE)
 #define GET_ALLOC(p) (GET(p) & 0x1)
 /* get offset of this ptr */
 #define GET_OFFSET(p) ((char *)(p) - free_listp)
@@ -109,29 +109,35 @@ static void *split_block(void *bp, size_t pack_v1, size_t pack_v2);
 
 
 /* segregated free list */
-#define FREE_LIST_LEN 13
+#define FREE_LIST_LEN 10
 /* sentinel size(PREV | SUCC) */
 #define FREE_LIST_SENTINEL_SIZE DSIZE
 // get the ith free list
 #define FREE_LIST_REF(k) (free_listp + (k) * FREE_LIST_SENTINEL_SIZE)
 #define FREE_LIST_IDX(p) (((char*)p - free_listp) / FREE_LIST_SENTINEL_SIZE)
 /* get free list class ptr
- * size: usable size of the free block
+ * size: size of the free block.
+ * assert (size >= MIN_BLOCK_SIZE)
  * */
 inline static void *get_class_ptr(size_t size)
 {
     /*
-     * {1-2},{3-4}, {5-8}, ..., {2049 - 4096}, {4097 - +inf}
-     * 2^1, 2^2, 2^3, ...., 2^12, ...
+     * size is a multiple of 8. size = k * 8. 
+     * We have k >= 2.
+     * {2}, {3-4}, ..., {257, 512}, {513, +inf}
+     * 2^1, 2^2, 2^3, ...., 2^9, ...
      */
 
-    size_t offset;
-    if (size == 1) {
-        offset = 0;
-    } else if (size > 4096) {
-        offset = FREE_LIST_LEN-1;
+    int offset;
+    // TODO: remove this assert
+    // assert(size % 8 == 0);
+    // assert(size/8 >= 2);
+    if (size > 4096) {
+        offset = FREE_LIST_LEN - 1;
     } else {
-        offset = 31 - __builtin_clz(size-1);
+        // k >= 2
+        size_t k = size >> 3;
+        offset = 31 - __builtin_clz(k-1);
     }
     return FREE_LIST_REF(offset);
 }
@@ -142,9 +148,8 @@ inline static void *get_class_ptr(size_t size)
 inline static void append_free_block(void *bp)
 {
     // usable block size should exlude the header/footer size
-    size_t usable_size = GET_USABLE_SIZE(HDRP(bp));
-    printf("append_free_block: %zu\n", usable_size);
-    void *class_ptr = get_class_ptr(usable_size);
+    size_t size = GET_SIZE(HDRP(bp));
+    void *class_ptr = get_class_ptr(size);
     void *tail_bp = PRED_BLKP(class_ptr);
 
     // insert_free_block(tail_bp, bp);
@@ -170,9 +175,9 @@ inline static void insert_free_block(void *prev_bp, void *bp)
  * remove free block from free list
  * assert bp is not a class_ptr
  */
-inline static void remove_free_block(char *bp)
+inline static void remove_free_block(void *bp)
 {
-    char *pred_bp = PRED_BLKP(bp),
+    void *pred_bp = PRED_BLKP(bp),
          *succ_bp = SUCC_BLKP(bp);
     PUT(SUCC(pred_bp), GET_OFFSET(succ_bp));
     PUT(PRED(succ_bp), GET_OFFSET(pred_bp));
@@ -216,6 +221,7 @@ int mm_init(void) {
     if (extend_heap(CHUNKSIZE/WSIZE) == NULL) {
         return -1;
     }
+    mm_checkheap(__LINE__);
     return 0;
 }
 
@@ -236,36 +242,45 @@ static void *extend_heap(size_t words)
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
 
     bp = coalesce(bp);
-    printf("extend heap, %u\n", GET_SIZE(HDRP(bp)));
-    append_free_block(bp);
+    // printf("extend heap, %u\n", GET_SIZE(HDRP(bp)));
     return bp;
 }
 
 
+/*
+ * after coalesce, we append the new free block
+ */
 static void *coalesce(void *bp)
 {
-    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
-    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+    void *prev_bp = PREV_BLKP(bp);
+    size_t prev_alloc = GET_ALLOC(FTRP(prev_bp));
+    void *next_bp = NEXT_BLKP(bp);
+    size_t next_alloc = GET_ALLOC(HDRP(next_bp));
     size_t size = GET_SIZE(HDRP(bp));
 
     if (prev_alloc && next_alloc) {
-        return bp;
+        // pass
     } else if (prev_alloc && !next_alloc) {
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        remove_free_block(next_bp);
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size, 0));
     } else if (!prev_alloc && next_alloc) {
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+        remove_free_block(prev_bp);
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     } else {
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) +
             GET_SIZE(FTRP(NEXT_BLKP(bp)));
+        remove_free_block(prev_bp);
+        remove_free_block(next_bp);
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
+    append_free_block(bp);
     return bp;
 }
 
@@ -274,13 +289,13 @@ static void *coalesce(void *bp)
  */
 void *malloc (size_t size)
 {
-    printf("malloc: %zu\n",size);
+    // printf("malloc: %zu\n",size);
     size_t asize;
     char *bp;
     size_t extendsize;
     if (size <= 0) return NULL;
     if (size <= DSIZE) {
-        asize = 2*DSIZE;
+        asize = MIN_BLOCK_SIZE;
     } else {
         asize = DSIZE * ((size + DSIZE + DSIZE - 1) / DSIZE);
     }
@@ -289,6 +304,8 @@ void *malloc (size_t size)
         place(bp, asize);
         return bp;
     }
+
+    // printf("can't find fit\n");
 
     extendsize = MAX(asize, CHUNKSIZE);
 
@@ -372,8 +389,8 @@ void free (void *ptr)
     size_t size = GET_SIZE(HDRP(ptr));
     PUT(HDRP(ptr), PACK(size, 0));
     PUT(FTRP(ptr), PACK(size, 0));
-    ptr = coalesce(ptr);
-    append_free_block(ptr);
+    coalesce(ptr);
+    // append_free_block(ptr);
 }
 
 /*
@@ -416,7 +433,7 @@ void *realloc1(void *oldptr, size_t size)
                         PACK(size, 1),
                         PACK(oldsize-size, 0));
             free_block = coalesce(free_block);
-            append_free_block(free_block);
+            // append_free_block(free_block);
         } else {
             return oldptr;
         }
@@ -597,15 +614,14 @@ static void check_coalescing(const char *bp, int lineno)
 static void get_class_size_range(void *class_ptr, size_t *pmin_size, size_t *pmax_size)
 {
     size_t ref_offset = ((char *)class_ptr - (char *)free_listp) / FREE_LIST_SENTINEL_SIZE;
-    if (ref_offset == 0) {
-        *pmin_size = 1;
-        *pmax_size = 2;
-    } else if (ref_offset == FREE_LIST_LEN - 1) {
+    if (ref_offset == FREE_LIST_LEN - 1) {
         *pmin_size = 4097;
         *pmax_size = MAX_BLOCK_SIZE;
+    } else if (ref_offset == 0) {
+        *pmin_size = *pmax_size = MIN_BLOCK_SIZE;
     } else {
-        *pmin_size = (1<<ref_offset)+1;
-        *pmax_size = (1<<(1+ref_offset));
+        *pmin_size = ((1<<ref_offset)+1) * DSIZE;
+        *pmax_size = (1<<(1+ref_offset)) * DSIZE;
     }
 }
 
@@ -620,7 +636,7 @@ static void test_class_ptr()
         printf("%zu %zu\n", min_size, max_size);
     }
 
-    for (size_t i = 1; i <= 4097; i++) {
+    for (size_t i = MIN_BLOCK_SIZE; i <= 4096 + DSIZE; i+=DSIZE) {
         void *class_ptr = get_class_ptr(i);
         int offset = ((char *)class_ptr - free_listp) / FREE_LIST_SENTINEL_SIZE;
         size_t min_size, max_size;
@@ -686,10 +702,10 @@ void mm_checkheap(int lineno)
             CHECK_TRUE(IS_FREE(bp), lineno, "free blocks should contain\
                     only free pointers");
             CHECK_TRUE(in_heap(bp), lineno, "free blocks in heap");
-            printf("%d %zu %zu %zu\n", (int)FREE_LIST_IDX(class_ptr), (size_t)GET_USABLE_SIZE(HDRP(bp)), min_class_size, max_class_size);
-            CHECK_LESS_EQUAL(GET_USABLE_SIZE(HDRP(bp)), max_class_size, lineno,
+            // printf("%d %zu %zu %zu\n", (int)FREE_LIST_IDX(class_ptr), (size_t)GET_SIZE(HDRP(bp)), min_class_size, max_class_size);
+            CHECK_LESS_EQUAL(GET_SIZE(HDRP(bp)), max_class_size, lineno,
                     "free block size in class range(max size)");
-            CHECK_GREATER_EQUAL(GET_USABLE_SIZE(HDRP(bp)), min_class_size, lineno,
+            CHECK_GREATER_EQUAL(GET_SIZE(HDRP(bp)), min_class_size, lineno,
                     "free block size in class range(min size)");
 
         }
