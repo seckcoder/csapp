@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 #include "mm.h"
 #include "memlib.h"
@@ -42,7 +43,7 @@
 #define CHUNKSIZE (1<<12)
 #define MIN_FREE_BLOCK_SIZE (2*DSIZE)
 #define MIN_BLOCK_SIZE (2*DSIZE)
-#define MAX_BLOCK_SIZE ((1<<31)-1)
+#define MAX_BLOCK_SIZE INT_MAX /* TODO: better definition? */
 
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(p) (((size_t)(p) + (ALIGNMENT-1)) & ~0x7)
