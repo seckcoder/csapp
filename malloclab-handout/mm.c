@@ -145,6 +145,7 @@ inline static void *get_class_ptr(size_t size)
 /*
  *  append free block to the tail of free list
  */
+#if 0
 inline static void append_free_block(void *bp)
 {
     // usable block size should exlude the header/footer size
@@ -158,6 +159,8 @@ inline static void append_free_block(void *bp)
     PUT(SUCC(tail_bp), GET_OFFSET(bp));
     PUT(PRED(class_ptr), GET_OFFSET(bp));
 }
+#endif
+
 
 /*
  * insert free block bp after prev_bp
@@ -169,6 +172,19 @@ inline static void insert_free_block(void *prev_bp, void *bp)
     PUT(PRED(bp), GET_OFFSET(prev_bp));
     PUT(SUCC(prev_bp), GET_OFFSET(bp));
     PUT(PRED(succ_bp), GET_OFFSET(bp));
+}
+
+inline static void insert_free_block_address_order(void *bp)
+{
+    size_t size = GET_SIZE(HDRP(bp));
+    void *class_ptr = get_class_ptr(size);
+    void *cur_bp;
+    for_each_free_block(class_ptr, cur_bp) {
+        if (cur_bp > bp) {
+            break;
+        }
+    }
+    insert_free_block(PRED_BLKP(cur_bp), bp);
 }
 
 /*
@@ -280,7 +296,7 @@ static void *coalesce(void *bp)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
-    append_free_block(bp);
+    insert_free_block_address_order(bp);
     return bp;
 }
 
@@ -335,7 +351,7 @@ static void place(void *bp, size_t size)
                 PACK(size, 1), // allocated block
                 PACK(total_size - size, 0) // free block
                 );
-        append_free_block(free_bp);
+        insert_free_block_address_order(free_bp);
     } else {
         PUT(HDRP(bp), PACK(total_size, 1));
         PUT(FTRP(bp), PACK(total_size, 1));
@@ -390,7 +406,6 @@ void free (void *ptr)
     PUT(HDRP(ptr), PACK(size, 0));
     PUT(FTRP(ptr), PACK(size, 0));
     coalesce(ptr);
-    // append_free_block(ptr);
 }
 
 /*
@@ -433,7 +448,6 @@ void *realloc1(void *oldptr, size_t size)
                         PACK(size, 1),
                         PACK(oldsize-size, 0));
             free_block = coalesce(free_block);
-            // append_free_block(free_block);
         } else {
             return oldptr;
         }
@@ -452,7 +466,7 @@ void *realloc1(void *oldptr, size_t size)
                     split_block(next_block,
                             PACK(first_block_size, 1),
                             PACK(second_block_size, 0));
-                append_free_block(free_block);
+                insert_free_block_address_order(free_block);
                 // change the size of the new block
                 PUT(HDRP(oldptr), PACK(size, 1));
                 PUT(FTRP(oldptr), PACK(size, 1));
@@ -576,11 +590,15 @@ static int aligned(const void *p) {
 }
 
 #define CHECK_GREATER_EQUAL(v, cmp_v, lineno, msg) if (!((v) >= (cmp_v))) {\
-  err_report(lineno, msg); \
+    err_report(lineno, msg); \
 }
 
 #define CHECK_LESS_EQUAL(v, cmp_v, lineno, msg) if (!((v) <= (cmp_v))) {\
-  err_report(lineno, msg); \
+    err_report(lineno, msg); \
+}
+
+#define CHECK_LESS(v, cmp_v, lineno, msg) if (!((v) < cmp_v)) {\
+    err_report(lineno, msg); \
 }
 
 
@@ -708,6 +726,9 @@ void mm_checkheap(int lineno)
             CHECK_GREATER_EQUAL(GET_SIZE(HDRP(bp)), min_class_size, lineno,
                     "free block size in class range(min size)");
 
+            // if blocks are inserted in address order, check address order
+            CHECK_LESS(PRED_BLKP(bp), bp, lineno,
+                    "address order for each free list");
         }
     }
 
