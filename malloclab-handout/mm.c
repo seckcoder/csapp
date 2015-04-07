@@ -24,13 +24,15 @@
 #endif
 
 
-#define FIFO
+#define SIZE_ORDER
 #ifdef LIFO
   #define insert_free_block insert_free_block_lifo
 #elif defined(FIFO)
   #define insert_free_block insert_free_block_fifo
 #elif defined(ADDRESS_ORDER)
   #define insert_free_block insert_free_block_address_order
+#elif defined(SIZE_ORDER)
+  #define insert_free_block insert_free_block_size_order
 #else
   #define insert_free_block insert_free_block_lifo
 #endif
@@ -210,9 +212,28 @@ inline static void insert_free_block_address_order(void *bp)
  */
 inline static void insert_free_block_lifo(void *bp)
 {
-  size_t size = GET_SIZE(HDRP(bp));
-  void *class_ptr = get_class_ptr(size);
-  insert_free_block_after(class_ptr, bp);
+    size_t size = GET_SIZE(HDRP(bp));
+    void *class_ptr = get_class_ptr(size);
+    insert_free_block_after(class_ptr, bp);
+}
+
+
+/*
+ * insert according to size order
+ */
+
+inline static void insert_free_block_size_order(void *bp)
+{
+    size_t size = GET_SIZE(HDRP(bp));
+    void *class_ptr = get_class_ptr(size);
+    void *cur_bp;
+    for_each_free_block(class_ptr, cur_bp) {
+        size_t cur_size = GET_SIZE(HDRP(bp));
+        if (cur_size >= size) {
+            break;
+        }
+    }
+    insert_free_block_after(PRED_BLKP(cur_bp), bp);
 }
 
 /*
@@ -754,9 +775,11 @@ void mm_checkheap(int lineno)
             CHECK_GREATER_EQUAL(GET_SIZE(HDRP(bp)), min_class_size, lineno,
                     "free block size in class range(min size)");
 
+#ifdef ADDRESS_ORDER
             // if blocks are inserted in address order, check address order
             CHECK_LESS(PRED_BLKP(bp), bp, lineno,
                     "address order for each free list");
+#endif
         }
     }
 
