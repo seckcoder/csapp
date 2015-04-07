@@ -24,7 +24,7 @@
 #endif
 
 
-#define ADDRESS_ORDER
+#define FIFO
 #ifdef LIFO
   #define insert_free_block insert_free_block_lifo
 #elif defined(FIFO)
