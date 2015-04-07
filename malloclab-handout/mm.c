@@ -40,7 +40,7 @@
 #define WSIZE 4
 #define DSIZE 8
 #define ALIGNMENT 8
-#define CHUNKSIZE (1<<12)
+#define CHUNKSIZE (1<<9)
 #define MIN_FREE_BLOCK_SIZE (2*DSIZE)
 #define MIN_BLOCK_SIZE (2*DSIZE)
 #define MAX_BLOCK_SIZE INT_MAX /* TODO: better definition? */
