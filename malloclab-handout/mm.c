@@ -24,6 +24,18 @@
 #endif
 
 
+#define ADDRESS_ORDER
+#ifdef LIFO
+  #define insert_free_block insert_free_block_lifo
+#elif defined(FIFO)
+  #define insert_free_block insert_free_block_fifo
+#elif defined(ADDRESS_ORDER)
+  #define insert_free_block insert_free_block_address_order
+#else
+  #define insert_free_block insert_free_block_lifo
+#endif
+
+
 /* do not change the following! */
 #ifdef DRIVER
 /* create aliases for driver tests */
@@ -142,30 +154,11 @@ inline static void *get_class_ptr(size_t size)
     return FREE_LIST_REF(offset);
 }
 
-/*
- *  append free block to the tail of free list
- */
-#if 0
-inline static void append_free_block(void *bp)
-{
-    // usable block size should exlude the header/footer size
-    size_t size = GET_SIZE(HDRP(bp));
-    void *class_ptr = get_class_ptr(size);
-    void *tail_bp = PRED_BLKP(class_ptr);
-
-    // insert_free_block(tail_bp, bp);
-    PUT(SUCC(bp), GET(SUCC(tail_bp)));
-    PUT(PRED(bp), GET_OFFSET(tail_bp));
-    PUT(SUCC(tail_bp), GET_OFFSET(bp));
-    PUT(PRED(class_ptr), GET_OFFSET(bp));
-}
-#endif
-
 
 /*
  * insert free block bp after prev_bp
  */
-inline static void insert_free_block(void *prev_bp, void *bp)
+inline static void insert_free_block_after(void *prev_bp, void *bp)
 {
     void *succ_bp = SUCC_BLKP(prev_bp);
     PUT(SUCC(bp), GET(SUCC(prev_bp)));
@@ -174,6 +167,31 @@ inline static void insert_free_block(void *prev_bp, void *bp)
     PUT(PRED(succ_bp), GET_OFFSET(bp));
 }
 
+/*
+ * first in first out
+ */
+inline static void insert_free_block_fifo(void *bp)
+{
+    // usable block size should exlude the header/footer size
+    size_t size = GET_SIZE(HDRP(bp));
+    void *class_ptr = get_class_ptr(size);
+    void *tail_bp = PRED_BLKP(class_ptr);
+
+    insert_free_block_after(tail_bp, bp);
+    /*
+    PUT(SUCC(bp), GET(SUCC(tail_bp)));
+    PUT(PRED(bp), GET_OFFSET(tail_bp));
+    PUT(SUCC(tail_bp), GET_OFFSET(bp));
+    PUT(PRED(class_ptr), GET_OFFSET(bp));
+    */
+}
+
+
+
+
+/*
+ * insert free block in address order
+ */
 inline static void insert_free_block_address_order(void *bp)
 {
     size_t size = GET_SIZE(HDRP(bp));
@@ -184,7 +202,17 @@ inline static void insert_free_block_address_order(void *bp)
             break;
         }
     }
-    insert_free_block(PRED_BLKP(cur_bp), bp);
+    insert_free_block_after(PRED_BLKP(cur_bp), bp);
+}
+
+/*
+ * last in first out
+ */
+inline static void insert_free_block_lifo(void *bp)
+{
+  size_t size = GET_SIZE(HDRP(bp));
+  void *class_ptr = get_class_ptr(size);
+  insert_free_block_after(class_ptr, bp);
 }
 
 /*
@@ -296,7 +324,7 @@ static void *coalesce(void *bp)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
-    insert_free_block_address_order(bp);
+    insert_free_block(bp);
     return bp;
 }
 
@@ -351,7 +379,7 @@ static void place(void *bp, size_t size)
                 PACK(size, 1), // allocated block
                 PACK(total_size - size, 0) // free block
                 );
-        insert_free_block_address_order(free_bp);
+        insert_free_block(free_bp);
     } else {
         PUT(HDRP(bp), PACK(total_size, 1));
         PUT(FTRP(bp), PACK(total_size, 1));
@@ -466,7 +494,7 @@ void *realloc1(void *oldptr, size_t size)
                     split_block(next_block,
                             PACK(first_block_size, 1),
                             PACK(second_block_size, 0));
-                insert_free_block_address_order(free_block);
+                insert_free_block(free_block);
                 // change the size of the new block
                 PUT(HDRP(oldptr), PACK(size, 1));
                 PUT(FTRP(oldptr), PACK(size, 1));
