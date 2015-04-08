@@ -24,7 +24,7 @@
 #endif
 
 
-#define FIFO
+#define SIZE_ORDER
 #ifdef LIFO
   #define insert_free_block insert_free_block_lifo
 #elif defined(FIFO)
@@ -457,95 +457,6 @@ void free (void *ptr)
     coalesce(ptr);
 }
 
-/*
- * realloc - you may want to look at mm-naive.c
- * highly optimized version of realloc. may contain bugs.
- */
-void *realloc1(void *oldptr, size_t size)
-{
-    size_t oldsize;
-    void *newptr;
-
-    /* If size == 0 then this is just free, and we return NULL. */
-    if(size == 0) {
-        free(oldptr);
-        return NULL;
-    }
-
-    /* If oldptr is NULL, then this is just malloc. */
-    if(oldptr == NULL) {
-        return malloc(size);
-    }
-
-    oldsize = GET_SIZE(HDRP(oldptr));
-
-    /*
-     * Basic idea:
-     * 1. if the size we want is smaller, then we don't need reallocate.
-     *    But we need to split the old block if necessary
-     * 2. check whether there is a free block next to the old block.
-     *    If the free block is large enough, we directly use it. Split
-     *    the free block if necessary.
-     * 3. Otherwise, we allocate a new block
-     */
-
-    if (size <= oldsize) {
-        if (size + MIN_FREE_BLOCK_SIZE <= oldsize) {
-            // split block
-            void *free_block =
-                split_block(oldptr,
-                        PACK(size, 1),
-                        PACK(oldsize-size, 0));
-            free_block = coalesce(free_block);
-        } else {
-            return oldptr;
-        }
-    } else {
-        // check whether the block next to current block is free and the size
-        // is large enough
-        void *next_block = NEXT_BLKP(oldptr);
-        size_t next_block_size = GET_SIZE(HDRP(next_block));
-        if (IS_FREE(next_block) && next_block_size + oldsize >= size) {
-            remove_free_block(next_block);
-            if (next_block_size + oldsize >= size + MIN_FREE_BLOCK_SIZE) {
-                // split the next block
-                size_t second_block_size = next_block_size + oldsize - size;
-                size_t first_block_size = next_block_size - second_block_size;
-                void *free_block =
-                    split_block(next_block,
-                            PACK(first_block_size, 1),
-                            PACK(second_block_size, 0));
-                insert_free_block(free_block);
-                // change the size of the new block
-                PUT(HDRP(oldptr), PACK(size, 1));
-                PUT(FTRP(oldptr), PACK(size, 1));
-            } else {
-                size = oldsize + next_block_size;
-                // directly use the next free block
-                PUT(HDRP(oldptr), PACK(size, 1));
-                PUT(FTRP(oldptr), PACK(size, 1));
-            }
-            return oldptr;
-        } else {
-            // allocate a new block
-            newptr = malloc(size);
-            /* If realloc() fails the original block is left untouched  */
-            if (!newptr) {
-                return 0;
-            }
-            /* Copy the old data. */
-            oldsize = GET_SIZE(HDRP(oldptr));
-            if(size < oldsize) oldsize = size;
-            memcpy(newptr, oldptr, oldsize);
-
-            /* Free the old block. */
-            free(oldptr);
-
-            return newptr;
-        }
-    }
-    return NULL; // make compiler happy
-}
 
 /*
  * realloc - Change the size of the block by mallocing a new block,
@@ -554,36 +465,36 @@ void *realloc1(void *oldptr, size_t size)
  */
 void *realloc(void *oldptr, size_t size)
 {
-  size_t oldsize;
-  void *newptr;
+    size_t oldsize;
+    void *newptr;
 
-  /* If size == 0 then this is just free, and we return NULL. */
-  if(size == 0) {
+    /* If size == 0 then this is just free, and we return NULL. */
+    if(size == 0) {
+        free(oldptr);
+        return 0;
+    }
+
+    /* If oldptr is NULL, then this is just malloc. */
+    if(oldptr == NULL) {
+        return malloc(size);
+    }
+
+    newptr = malloc(size);
+
+    /* If realloc() fails the original block is left untouched  */
+    if(!newptr) {
+        return 0;
+    }
+
+    /* Copy the old data. */
+    oldsize = GET_SIZE(HDRP(oldptr));
+    if(size < oldsize) oldsize = size;
+    memcpy(newptr, oldptr, oldsize);
+
+    /* Free the old block. */
     free(oldptr);
-    return 0;
-  }
 
-  /* If oldptr is NULL, then this is just malloc. */
-  if(oldptr == NULL) {
-    return malloc(size);
-  }
-
-  newptr = malloc(size);
-
-  /* If realloc() fails the original block is left untouched  */
-  if(!newptr) {
-    return 0;
-  }
-
-  /* Copy the old data. */
-  oldsize = GET_SIZE(HDRP(oldptr));
-  if(size < oldsize) oldsize = size;
-  memcpy(newptr, oldptr, oldsize);
-
-  /* Free the old block. */
-  free(oldptr);
-
-  return newptr;
+    return newptr;
 }
 
 /*
