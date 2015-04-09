@@ -24,7 +24,7 @@
 #endif
 
 
-#define SIZE_ORDER
+#define FIFO
 #ifdef LIFO
   #define insert_free_block insert_free_block_lifo
 #elif defined(FIFO)
@@ -349,6 +349,18 @@ static void *coalesce(void *bp)
     return bp;
 }
 
+inline size_t get_real_malloc_size(size_t size)
+{
+    size_t asize;
+    if (size <= DSIZE) {
+        // asize = MIN_BLOCK_SIZE;
+        asize = 2*DSIZE;
+    } else {
+        asize = DSIZE * ((size + DSIZE + DSIZE - 1) / DSIZE);
+    }
+    return asize;
+}
+
 /*
  * malloc
  */
@@ -359,11 +371,8 @@ void *malloc (size_t size)
     char *bp;
     size_t extendsize;
     if (size <= 0) return NULL;
-    if (size <= DSIZE) {
-        asize = MIN_BLOCK_SIZE;
-    } else {
-        asize = DSIZE * ((size + DSIZE + DSIZE - 1) / DSIZE);
-    }
+
+    asize = get_real_malloc_size(size);
 
     if ((bp = find_fit(asize)) != NULL) {
         place(bp, asize);
@@ -467,6 +476,7 @@ void *realloc(void *oldptr, size_t size)
 {
     size_t oldsize;
     void *newptr;
+    size_t asize;
 
     /* If size == 0 then this is just free, and we return NULL. */
     if(size == 0) {
@@ -479,23 +489,69 @@ void *realloc(void *oldptr, size_t size)
         return malloc(size);
     }
 
-    newptr = malloc(size);
+    oldsize = GET_SIZE(HDRP(oldptr));
+    void *next_bp = NEXT_BLKP(oldptr);
+    if (IS_FREE(next_bp)) {
+        // append next free block to the old block
+        remove_free_block(next_bp);
+        size_t next_bp_size = GET_SIZE(HDRP(next_bp));
+        PUT(HDRP(oldptr), PACK(oldsize+next_bp_size, 1));
+        PUT(FTRP(oldptr), PACK(oldsize+next_bp_size, 1));
+        oldsize += next_bp_size;
+    }
 
-    /* If realloc() fails the original block is left untouched  */
-    if(!newptr) {
+    asize = get_real_malloc_size(size);
+
+    if (oldsize >= asize) {
+        if (oldsize >= asize + MIN_FREE_BLOCK_SIZE) {
+            void *free_bp = split_block(
+                    oldptr,
+                    PACK(asize, 1),
+                    PACK(oldsize - asize, 0));
+            insert_free_block(free_bp);
+        }
+        newptr = oldptr;
+    } else {
+        newptr = malloc(size);
+
+        /* If realloc() fails the original block is left untouched  */
+        if(!newptr) {
+            return 0;
+        }
+
+        /* Copy the old data. */
+        if(size < oldsize) oldsize = size;
+        memcpy(newptr, oldptr, oldsize);
+
+        /* Free the old block. */
+        free(oldptr);
+    }
+    return newptr;
+}
+
+#if 0
+void *realloc1(void *oldptr, size_t size)
+{
+    size_t oldsize;
+    void *newptr;
+
+    /* If size == 0 then this is just free, and we return NULL. */
+    if(size == 0) {
+        free(oldptr);
         return 0;
     }
 
-    /* Copy the old data. */
+    /* If oldptr is NULL, then this is just malloc. */
+    if(oldptr == NULL) {
+        return malloc(size);
+    }
+
+
     oldsize = GET_SIZE(HDRP(oldptr));
-    if(size < oldsize) oldsize = size;
-    memcpy(newptr, oldptr, oldsize);
-
-    /* Free the old block. */
-    free(oldptr);
-
-    return newptr;
+    
+    return 0;
 }
+#endif
 
 /*
  * calloc - you may want to look at mm-naive.c
