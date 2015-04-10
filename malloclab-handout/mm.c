@@ -85,7 +85,8 @@
 
 /* GET_SIZE return the whole size(including header/footer) of the block */
 #define GET_SIZE(p) (GET(p) & ~0x7)
-/* GET_USABLE_SIZE return the real size to store content(excluding header/footer)
+/* GET_USABLE_SIZE return the real size to store content
+ * (excluding header/footer)
  * */
 // #define GET_USABLE_SIZE(p) (GET_SIZE(p)-DSIZE)
 #define GET_ALLOC(p) (GET(p) & 0x1)
@@ -121,7 +122,8 @@
     for ((ptr) = BEGIN_BLOCK; !IS_EPILOGUE(ptr); (ptr)=NEXT_BLKP(ptr))
 /* iterate through every free block in the free list */
 #define for_each_free_block(class_ptr, ptr) \
-    for ((ptr) = SUCC_BLKP(class_ptr); (ptr) != (class_ptr); (ptr) = SUCC_BLKP(ptr))
+    for ((ptr) = SUCC_BLKP(class_ptr); (ptr) != (class_ptr);\
+        (ptr) = SUCC_BLKP(ptr))
 /* enumerate free list in range */
 #define for_range_free_list(begin_ptr, end_ptr, ptr) \
     for ((ptr) = (begin_ptr); (ptr) != (end_ptr);\
@@ -198,12 +200,6 @@ inline static void insert_free_block_fifo(void *bp)
     void *tail_bp = PRED_BLKP(class_ptr);
 
     insert_free_block_after(tail_bp, bp);
-    /*
-    PUT(SUCC(bp), GET(SUCC(tail_bp)));
-    PUT(PRED(bp), GET_OFFSET(tail_bp));
-    PUT(SUCC(tail_bp), GET_OFFSET(bp));
-    PUT(PRED(class_ptr), GET_OFFSET(bp));
-    */
 }
 
 
@@ -300,7 +296,8 @@ int mm_init(void)
      *
      * The PRED points to the last free block while SUCC points to the
      * first free block.
-     * Generally, the free list pointer works as the sentinel for the free list.
+     * Generally, the free list pointer works as the sentinel for
+     * the free list.
      * Use both PRED and SUCC makes the code easier to maintain and less
      * if/else conditional judgements.
      */
@@ -658,9 +655,16 @@ static void check_block_consistency(const char *bp, int lineno)
     const char *header, *footer;
     header = HDRP(bp);
     footer = FTRP(bp);
-    CHECK_EQUAL(GET_SIZE(header), GET_SIZE(footer), lineno, "check header/footer size");
-    CHECK_EQUAL(GET_ALLOC(header), GET_ALLOC(footer), lineno, "check header/footer alloc");
-    CHECK_GREATER_EQUAL(GET_SIZE(header), MIN_BLOCK_SIZE, lineno, "check minimum block size");
+    CHECK_EQUAL(GET_SIZE(header), GET_SIZE(footer),
+        lineno,
+        "check header/footer size");
+    CHECK_EQUAL(GET_ALLOC(header), GET_ALLOC(footer),
+        lineno,
+        "check header/footer alloc");
+    CHECK_GREATER_EQUAL(GET_SIZE(header),
+        MIN_BLOCK_SIZE,
+        lineno,
+        "check minimum block size");
     if (IS_FREE(bp)) {
         CHECK_GREATER_EQUAL(GET_SIZE(header), MIN_FREE_BLOCK_SIZE, lineno,
                 "check minimum free block size");
@@ -674,8 +678,11 @@ static void check_block_consistency(const char *bp, int lineno)
 static void check_coalescing(const char *bp, int lineno)
 {
     if (IS_FREE(bp)) {
-        CHECK_EQUAL(GET_ALLOC(HDRP(NEXT_BLKP(bp))), 1, lineno, "next block is free");
-        CHECK_EQUAL(GET_ALLOC(HDRP(PREV_BLKP(bp))), 1, lineno, "prev block is free");
+        CHECK_EQUAL(GET_ALLOC(HDRP(NEXT_BLKP(bp))), 1,
+            lineno,
+            "next block is free");
+        CHECK_EQUAL(GET_ALLOC(HDRP(PREV_BLKP(bp))), 1, lineno,
+            "prev block is free");
     }
 }
 
@@ -686,7 +693,8 @@ static void check_coalescing(const char *bp, int lineno)
  */
 static void get_class_size_range(void *class_ptr, size_t *pmin_size, size_t *pmax_size)
 {
-    size_t ref_offset = ((char *)class_ptr - (char *)free_listp) / FREE_LIST_SENTINEL_SIZE;
+    size_t ref_offset = ((char *)class_ptr - (char *)free_listp) /
+      FREE_LIST_SENTINEL_SIZE;
     if (ref_offset == FREE_LIST_LEN - 1) {
         *pmin_size = 4097;
         *pmax_size = MAX_BLOCK_SIZE;
@@ -711,8 +719,11 @@ void mm_checkheap(int lineno)
     size_t max_class_size;
     /* check prologue content */
 
-    CHECK_EQUAL(GET(HDRP(heap_listp)), PACK(8,1), lineno, "check prologue header content");
-    CHECK_EQUAL(GET(FTRP(heap_listp)), PACK(8,1), lineno, "check prologue footer content");
+    CHECK_EQUAL(GET(HDRP(heap_listp)), PACK(8,1),
+        lineno,
+        "check prologue header content");
+    CHECK_EQUAL(GET(FTRP(heap_listp)), PACK(8,1),
+        lineno, "check prologue footer content");
 
 
     /* check block consistency */
@@ -753,7 +764,6 @@ void mm_checkheap(int lineno)
             CHECK_TRUE(IS_FREE(bp), lineno, "free blocks should contain\
                     only free pointers");
             CHECK_TRUE(in_heap(bp), lineno, "free blocks in heap");
-            // printf("%d %zu %zu %zu\n", (int)FREE_LIST_IDX(class_ptr), (size_t)GET_SIZE(HDRP(bp)), min_class_size, max_class_size);
             CHECK_LESS_EQUAL(GET_SIZE(HDRP(bp)), max_class_size, lineno,
                     "free block size in class range(max size)");
             CHECK_GREATER_EQUAL(GET_SIZE(HDRP(bp)), min_class_size, lineno,
@@ -767,5 +777,6 @@ void mm_checkheap(int lineno)
         }
     }
 
-    CHECK_EQUAL(free_block_count, free_block_count_in_free_list, lineno, "free block count consistency");
+    CHECK_EQUAL(free_block_count, free_block_count_in_free_list,
+        lineno, "free block count consistency");
 }
