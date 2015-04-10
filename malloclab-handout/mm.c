@@ -24,6 +24,15 @@
 #endif
 
 
+/* The order of free block list.
+ *
+ * FIFO: first in first out.
+ * LIFO: last in first out.
+ * ADDRESS_ORDER: free block list in address order. Smaller address first.
+ * SIZE_ORDER: free block list in size order. Smaller size first.
+ * 
+ * According to the test, FIFO performs the best.
+ */
 #define FIFO
 #ifdef LIFO
   #define insert_free_block insert_free_block_lifo
@@ -55,9 +64,16 @@
 #define DSIZE 8
 #define ALIGNMENT 8
 #define CHUNKSIZE (1<<9)
+/*
+ * The minimum free block size.
+ * For each free block, we need to have a header and a footer, a successor and
+ * a predecessor. 
+ * We store the successor as the offset from the beginning of the whole heap*
+ * As the heap's max size is 2^31, we can store it in WSIZE bytes.
+ */
 #define MIN_FREE_BLOCK_SIZE (2*DSIZE)
 #define MIN_BLOCK_SIZE (2*DSIZE)
-#define MAX_BLOCK_SIZE INT_MAX /* TODO: better definition? */
+#define MAX_BLOCK_SIZE INT_MAX
 
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(p) (((size_t)(p) + (ALIGNMENT-1)) & ~0x7)
@@ -103,6 +119,7 @@
 /* iterate through every block between epilogue and prologue block */
 #define for_each_block(ptr) \
     for ((ptr) = BEGIN_BLOCK; !IS_EPILOGUE(ptr); (ptr)=NEXT_BLKP(ptr))
+/* iterate through every free block in the free list */
 #define for_each_free_block(class_ptr, ptr) \
     for ((ptr) = SUCC_BLKP(class_ptr); (ptr) != (class_ptr); (ptr) = SUCC_BLKP(ptr))
 /* enumerate free list in range */
@@ -126,8 +143,9 @@ static void *split_block(void *bp, size_t pack_v1, size_t pack_v2);
 #define FREE_LIST_LEN 10
 /* sentinel size(PREV | SUCC) */
 #define FREE_LIST_SENTINEL_SIZE DSIZE
-// get the ith free list
+/* get the ith free list */
 #define FREE_LIST_REF(k) (free_listp + (k) * FREE_LIST_SENTINEL_SIZE)
+/* return the index of the free list pointer */
 #define FREE_LIST_IDX(p) (((char*)p - free_listp) / FREE_LIST_SENTINEL_SIZE)
 /* get free list class ptr
  * size: size of the free block.
@@ -137,7 +155,7 @@ inline static void *get_class_ptr(size_t size)
 {
     /*
      * size is a multiple of 8. size = k * 8. 
-     * We have k >= 2.
+     * We have k >= 2 since MIN_FREE_BLOCK_SIZE is 2*DSIZE
      * {2}, {3-4}, ..., {257, 512}, {513, +inf}
      * 2^1, 2^2, 2^3, ...., 2^9, ...
      */
@@ -253,30 +271,49 @@ inline static void remove_free_block(void *bp)
 /*
  * Initialize: return -1 on error, 0 on success.
  */
-int mm_init(void) {
-    int i;
-    /* This part is tricky.
-     * FREE_LIST_LEN is odd number.
+int mm_init(void)
+{
+    /*
+     * Generally structure of the heap is:
+     *
+     * [ FREE LIST POINTERS | PRELOGUE BLOCK | HEAP MEMORY | EPILOGUE BLOCK ]
      */
-    if ((free_listp = mem_sbrk(FREE_LIST_LEN*FREE_LIST_SENTINEL_SIZE)) == (void*)-1) {
+    int i;
+
+    /* allocate memory for free block pointers */
+    if ((free_listp = mem_sbrk(
+                    FREE_LIST_LEN*FREE_LIST_SENTINEL_SIZE)) == (void*)-1) {
         return -1;
     }
 
-    /*
-     * odd + 3 is even
-     */
+    /* prologue and epilogue */
     if ((heap_listp = mem_sbrk(4*WSIZE)) == (void*) - 1) {
         return -1;
     }
 
-    // initialize free list
+    /* initialize free list pointers
+     *
+     * Each free list pointer has DSIZE bytes consisting of predecessor and
+     * successor.
+     * 
+     * [PRED | SUCC].
+     *
+     * The PRED points to the last free block while SUCC points to the
+     * first free block.
+     * Generally, the free list pointer works as the sentinel for the free list.
+     * Use both PRED and SUCC makes the code easier to maintain and less
+     * if/else conditional judgements.
+     */
     for (i = 0; i < FREE_LIST_LEN; i++) {
+        /* initially, as each free list is empty, the free list pointer
+         * just points to the sentinel
+         */
         PUT(PRED(FREE_LIST_REF(i)), i * FREE_LIST_SENTINEL_SIZE);
         PUT(SUCC(FREE_LIST_REF(i)), i * FREE_LIST_SENTINEL_SIZE);
     }
 
 
-    // initialize prologue
+    // initialize prologue and epilogue
     PUT(heap_listp, 0);
     PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));
     PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
@@ -290,6 +327,9 @@ int mm_init(void) {
     return 0;
 }
 
+/*
+ * extend_heap  - extend the heap size
+ */
 static void *extend_heap(size_t words)
 {
     char *bp;
@@ -307,18 +347,21 @@ static void *extend_heap(size_t words)
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
 
     bp = coalesce(bp);
-    // printf("extend heap, %u\n", GET_SIZE(HDRP(bp)));
     return bp;
 }
 
 
 /*
+ * coalesce: coalesce the free block.
+ *
  * after coalesce, we append the new free block
  */
 static void *coalesce(void *bp)
 {
+    // previous block
     void *prev_bp = PREV_BLKP(bp);
     size_t prev_alloc = GET_ALLOC(FTRP(prev_bp));
+    // next block
     void *next_bp = NEXT_BLKP(bp);
     size_t next_alloc = GET_ALLOC(HDRP(next_bp));
     size_t size = GET_SIZE(HDRP(bp));
@@ -345,15 +388,20 @@ static void *coalesce(void *bp)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
+    // insert the new free block
     insert_free_block(bp);
     return bp;
 }
 
+/*
+ * Generally, the allocated size is larger than the size we want since
+ * we need to store the header and footer. This function return
+ * the real size we need to allocate.
+ */
 inline size_t get_real_malloc_size(size_t size)
 {
     size_t asize;
     if (size <= DSIZE) {
-        // asize = MIN_BLOCK_SIZE;
         asize = 2*DSIZE;
     } else {
         asize = DSIZE * ((size + DSIZE + DSIZE - 1) / DSIZE);
@@ -366,7 +414,6 @@ inline size_t get_real_malloc_size(size_t size)
  */
 void *malloc (size_t size)
 {
-    // printf("malloc: %zu\n",size);
     size_t asize;
     char *bp;
     size_t extendsize;
@@ -437,13 +484,15 @@ static void *split_block(
 
 /*
  * find a block of memory with size >= "size"
+ * We use first fit stratergy. I have tried other strategies,
+ * but first fit works very well.
  */
 static void *find_fit(size_t size)
 {
-    // first fit
     void *begin_class_ptr = get_class_ptr(size);
     void *class_ptr;
     void *bp;
+    /* enumerate all free list with blocksize >= "size" */
     for_range_free_list(begin_class_ptr, END_CLASS_PTR, class_ptr) {
         for_each_free_block(class_ptr, bp) {
             size_t alloc = GET_ALLOC(HDRP(bp));
@@ -469,8 +518,10 @@ void free (void *ptr)
 
 /*
  * realloc - Change the size of the block by mallocing a new block,
- *      copying its data, and freeing the old block.  I'm too lazy
- *      to do better.
+ *      copying its data, and freeing the old block.
+ * 
+ * This is an optimized realloc implementation, but it performs the same
+ * as the unoptimized version...
  */
 void *realloc(void *oldptr, size_t size)
 {
@@ -490,6 +541,7 @@ void *realloc(void *oldptr, size_t size)
     }
 
     oldsize = GET_SIZE(HDRP(oldptr));
+    /* if the block next to oldptr is a free block, we merge it */
     void *next_bp = NEXT_BLKP(oldptr);
     if (IS_FREE(next_bp)) {
         // append next free block to the old block
@@ -503,6 +555,9 @@ void *realloc(void *oldptr, size_t size)
     asize = get_real_malloc_size(size);
 
     if (oldsize >= asize) {
+        /* since oldsize is large enough, we don't need to find a new block
+         * of memory
+         */
         if (oldsize >= asize + MIN_FREE_BLOCK_SIZE) {
             void *free_bp = split_block(
                     oldptr,
@@ -528,30 +583,6 @@ void *realloc(void *oldptr, size_t size)
     }
     return newptr;
 }
-
-#if 0
-void *realloc1(void *oldptr, size_t size)
-{
-    size_t oldsize;
-    void *newptr;
-
-    /* If size == 0 then this is just free, and we return NULL. */
-    if(size == 0) {
-        free(oldptr);
-        return 0;
-    }
-
-    /* If oldptr is NULL, then this is just malloc. */
-    if(oldptr == NULL) {
-        return malloc(size);
-    }
-
-
-    oldsize = GET_SIZE(HDRP(oldptr));
-    
-    return 0;
-}
-#endif
 
 /*
  * calloc - you may want to look at mm-naive.c
@@ -618,6 +649,10 @@ static int aligned(const void *p) {
 }
 
 
+/*
+ * check_block_consistency  - check header/footer size and content, check
+ *      minimum block size
+ */
 static void check_block_consistency(const char *bp, int lineno)
 {
     const char *header, *footer;
@@ -632,6 +667,10 @@ static void check_block_consistency(const char *bp, int lineno)
     }
 }
 
+/*
+ * check_coalescing  - check whether every free block is coalesced, i.e.,
+ * there should be no free blocks next to every free block
+ */
 static void check_coalescing(const char *bp, int lineno)
 {
     if (IS_FREE(bp)) {
@@ -658,28 +697,6 @@ static void get_class_size_range(void *class_ptr, size_t *pmin_size, size_t *pma
         *pmax_size = (1<<(1+ref_offset)) * DSIZE;
     }
 }
-
-/* test code */
-#if 0
-static void test_class_ptr()
-{
-    for (int i = 0; i < FREE_LIST_LEN; i++) {
-        void *class_ptr = FREE_LIST_REF(i);
-        size_t min_size, max_size;
-        get_class_size_range(class_ptr, &min_size, &max_size);
-        printf("%zu %zu\n", min_size, max_size);
-    }
-
-    for (size_t i = MIN_BLOCK_SIZE; i <= 4096 + DSIZE; i+=DSIZE) {
-        void *class_ptr = get_class_ptr(i);
-        int offset = ((char *)class_ptr - free_listp) / FREE_LIST_SENTINEL_SIZE;
-        size_t min_size, max_size;
-        get_class_size_range(FREE_LIST_REF(offset), &min_size, &max_size);
-        CHECK_LESS_EQUAL(i, max_size, __LINE__, "max size");
-        CHECK_GREATER_EQUAL(i, min_size, __LINE__, "min_size");
-    }
-}
-#endif
 
 /*
  * mm_checkheap
