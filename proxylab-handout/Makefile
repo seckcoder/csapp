@@ -11,13 +11,28 @@ LDFLAGS = -lpthread
 
 all: proxy
 
-csapp.o: csapp.c csapp.h
-	$(CC) $(CFLAGS) -c csapp.c
 
-proxy.o: proxy.c csapp.h
-	$(CC) $(CFLAGS) -c proxy.c
+%.o: %.c
+	$(CC) $(CFLAGS) -c $<
 
-proxy: proxy.o csapp.o
+H_FILES = util.h dstring.h csapp.h
+
+OBJ_SRC = csapp.c dstring.c util.c
+
+PROXY_SRC = $(OBJ_SRC) proxy.c
+
+PROXY_OBJ = $(PROXY_SRC:%c=%o)
+
+
+proxy: $(PROXY_OBJ) $(H_FILES)
+	$(CC) $(LDFLAGS) $(PROXY_OBJ) -o $@
+
+TEST_SRC = $(OBJ_SRC) test.c
+
+TEST_OBJ = $(TEST_SRC:%c=%o)
+
+test: $(TEST_OBJ) $(H_FILES)
+	$(CC) $(LDFLAGS) $(TEST_OBJ) -o $@
 
 # Creates a tarball in ../proxylab-handin.tar that you should then
 # hand in to Autolab. DO NOT MODIFY THIS!
@@ -26,4 +41,3 @@ handin:
 
 clean:
 	rm -f *~ *.o proxy core *.tar *.zip *.gzip *.bzip *.gz
-
