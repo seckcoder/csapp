@@ -45,7 +45,7 @@ void string_append(string *pstr, const char *cstr)
         strcpy(new_str, pstr->cstr);
         strcpy(&new_str[pstr->len], cstr);
         pstr->cstr = new_str;
-        pstr->len = pstr->len + cstr_len + 1;
+        pstr->len += cstr_len;
         pstr->size = new_size;
     }
 }
