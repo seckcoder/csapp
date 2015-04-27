@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 #include "csapp.h"
 #include "dstring.h"
 #include "util.h"
@@ -48,12 +49,48 @@ void forward_response(int infd, int outfd)
     struct string response;
     string_malloc(&response);
 
-    while (Rio_readlineb(&rio, buf, MAXLINE)) {
-        // printf("%s\n", buf);
-        string_append(&response, buf);
+    if (!Rio_readlineb(&rio, buf, MAXLINE)) {
+        //TODO: error report
+        return;
     }
+
+    string_append(&response, buf);
+
+    Rio_readlineb(&rio, buf, MAXLINE);
+    char header_name[MAXLINE], header_value[MAXLINE];
+    int content_length = 0;
+    while (strcmp(buf, "\r\n")) {
+        parse_header(buf, header_name, header_value);
+        if (strcasecmp(header_name, "Content-length") == 0) {
+            content_length = atoi(header_value);
+        }
+        string_append(&response, buf);
+        Rio_readlineb(&rio, buf, MAXLINE);
+    }
+    string_append(&response, buf);
+
+    if (content_length == 0) {
+        // TODO: error handling
+        return;
+    } else {
 #ifdef DEBUG
-    fprintf(stderr, "response:\n%s", string_cstr(response));
+        fprintf(stderr, "Content-length: %d\n", content_length);
+#endif
+        // read content
+        char *content_buf = (char *)malloc((content_length+1)*sizeof(char));
+        Rio_readnb(&rio, content_buf, content_length);
+        string_appendn(&response, content_buf, (size_t)content_length);
+        free(content_buf);
+    }
+    if (Rio_readlineb(&rio, buf, MAXLINE) != 0) {
+        // TODO: error handling
+        return;
+    }
+    
+
+#ifdef DEBUG
+    fprintf(stderr, "response length: %zu\n", string_length(response));
+    // fprintf(stderr, "response:\n%s", string_cstr(response));
 #endif
     
     Rio_writen(outfd,

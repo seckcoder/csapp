@@ -19,5 +19,6 @@ void string_malloc(string *pstr);
 void string_free(string *pstr);
 
 void string_append(string *pstr, const char *cstr);
+void string_appendn(string *pstr, const char *cstr, size_t cstr_len);
 
 #endif

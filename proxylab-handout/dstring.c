@@ -36,17 +36,30 @@ inline static size_t ceil_divide(size_t a, size_t b)
 void string_append(string *pstr, const char *cstr)
 {
     size_t cstr_len = strlen(cstr);
+    string_appendn(pstr, cstr, cstr_len);
+}
+
+void string_appendn(string *pstr, const char *cstr, size_t cstr_len)
+{
     if (pstr->len + cstr_len + 1 <= pstr->size) {
-        strcpy(&pstr->cstr[pstr->len], cstr);
+        for (int i = 0; i < cstr_len; i++) {
+            pstr->cstr[pstr->len+i] = cstr[i];
+        }
         pstr->len += cstr_len;
     } else {
-        size_t multiplier = ceil_divide((cstr_len + pstr->len + 1) , pstr->size);
-        size_t new_size = multiplier * pstr->size;
+        size_t multipler = ceil_divide((cstr_len + pstr->len + 1),
+                pstr->size);
+        size_t new_size = multipler * pstr->size;
         char *new_str = (char *)malloc(new_size*sizeof(char));
-        strcpy(new_str, pstr->cstr);
-        strcpy(&new_str[pstr->len], cstr);
-        pstr->cstr = new_str;
+        for (int i = 0; i < pstr->len; i++) {
+            new_str[i] = pstr->cstr[i];
+        }
+        for (int i = 0; i < cstr_len; i++) {
+            new_str[pstr->len+i] = cstr[i];
+        }
         pstr->len += cstr_len;
         pstr->size = new_size;
+        pstr->cstr = new_str;
     }
+    pstr->cstr[pstr->len] ='\0';
 }
