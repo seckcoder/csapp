@@ -15,9 +15,9 @@ all: proxy
 %.o: %.c
 	$(CC) $(CFLAGS) -c $<
 
-H_FILES = util.h dstring.h csapp.h
+H_FILES = util.h bytes.h csapp.h cache.h
 
-OBJ_SRC = csapp.c dstring.c util.c
+OBJ_SRC = csapp.c bytes.c util.c cache.c
 
 PROXY_SRC = $(OBJ_SRC) proxy.c
 
@@ -25,14 +25,14 @@ PROXY_OBJ = $(PROXY_SRC:%c=%o)
 
 
 proxy: $(PROXY_OBJ) $(H_FILES)
-	$(CC) $(LDFLAGS) $(PROXY_OBJ) -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PROXY_OBJ) -o $@
 
 TEST_SRC = $(OBJ_SRC) test.c
 
 TEST_OBJ = $(TEST_SRC:%c=%o)
 
 test: $(TEST_OBJ) $(H_FILES)
-	$(CC) $(LDFLAGS) $(TEST_OBJ) -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $(TEST_OBJ) -o $@
 
 # Creates a tarball in ../proxylab-handin.tar that you should then
 # hand in to Autolab. DO NOT MODIFY THIS!

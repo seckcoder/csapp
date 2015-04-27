@@ -2,8 +2,9 @@
 #include <stdlib.h>
 #include <assert.h>
 #include "csapp.h"
-#include "dstring.h"
 #include "util.h"
+#include "bytes.h"
+#include "cache.h"
 
 // #define DEBUG
 #undef DEBUG
@@ -11,6 +12,9 @@
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
+
+lru_cache_t lru_cache;
+sem_t mutex;
 
 
 /* You won't lose style points for including these long lines in your code */
@@ -40,21 +44,21 @@ void read_response(int infd)
     }
 }
 
-void forward_response(int infd, int outfd)
+void forward_response(const char *key, int infd, int outfd)
 {
     rio_t rio;
     Rio_readinitb(&rio, infd);
 
     char buf[MAXLINE];
-    struct string response;
-    string_malloc(&response);
+    struct Bytes response;
+    bytes_malloc(&response);
 
     if (!Rio_readlineb(&rio, buf, MAXLINE)) {
         //TODO: error report
         return;
     }
 
-    string_append(&response, buf);
+    bytes_append(&response, buf);
 
     Rio_readlineb(&rio, buf, MAXLINE);
     char header_name[MAXLINE], header_value[MAXLINE];
@@ -64,10 +68,10 @@ void forward_response(int infd, int outfd)
         if (strcasecmp(header_name, "Content-length") == 0) {
             content_length = atoi(header_value);
         }
-        string_append(&response, buf);
+        bytes_append(&response, buf);
         Rio_readlineb(&rio, buf, MAXLINE);
     }
-    string_append(&response, buf);
+    bytes_append(&response, buf);
 
     if (content_length == 0) {
         // TODO: error handling
@@ -79,7 +83,7 @@ void forward_response(int infd, int outfd)
         // read content
         char *content_buf = (char *)Malloc((content_length+1)*sizeof(char));
         Rio_readnb(&rio, content_buf, content_length);
-        string_appendn(&response, content_buf, (size_t)content_length);
+        bytes_appendn(&response, content_buf, (size_t)content_length);
         Free(content_buf);
     }
     if (Rio_readlineb(&rio, buf, MAXLINE) != 0) {
@@ -94,10 +98,16 @@ void forward_response(int infd, int outfd)
 #endif
     
     Rio_writen(outfd,
-            string_cstr(response),
-            string_length(response));
+            bytes_buf(response),
+            bytes_length(response));
 
-    string_free(&response);
+    if (bytes_length(response) < MAX_OBJECT_SIZE) {
+        P(&mutex);
+        lru_cache_insert(&lru_cache, key, bytes_buf(response),
+                bytes_length(response));
+        V(&mutex);
+    }
+    bytes_free(&response);
 }
 
 void forward(int fromfd)
@@ -123,6 +133,18 @@ void forward(int fromfd)
 #ifdef DEBUG
     fprintf(stderr, "host: %s port: %s dir: %s\n", host, port, dir);
 #endif
+
+    char formated_uri[MAXLINE];
+    sprintf(formated_uri, "%s:%s%s", host, port, dir);
+    P(&mutex);
+    lru_cache_node_t *pnode = lru_cache_find(&lru_cache, formated_uri);
+
+    if (pnode) {
+        Rio_writen(fromfd, pnode->value, pnode->value_len);
+        V(&mutex);
+        return;
+    }
+    V(&mutex);
     
     sprintf(request_buf, "%s %s %s\r\n", method, dir, version);
     
@@ -164,14 +186,13 @@ void forward(int fromfd)
 #ifdef DEBUG
     fprintf(stderr, "request buf:\n%s\n", request_buf);
 #endif
-    int clientfd = Open_clientfd(
-            host, port);
+    int clientfd = Open_clientfd(host, port);
     Rio_writen(clientfd, request_buf, strlen(request_buf));
     
     // receive data
     // read_response(clientfd);
     
-    forward_response(clientfd, fromfd);
+    forward_response(formated_uri, clientfd, fromfd);
     Close(clientfd);
 }
 
@@ -198,6 +219,8 @@ int main(int argc, char **argv)
     struct sockaddr_storage clientaddr;
     socklen_t clientlen = sizeof(clientaddr);
     int *connfdp;
+    lru_cache_init(&lru_cache, MAX_CACHE_SIZE);
+    Sem_init(&mutex, 0, 1);
     while (1) {
         connfdp = Malloc(sizeof(int));
         *connfdp = Accept(listenfd,
@@ -212,5 +235,6 @@ int main(int argc, char **argv)
             Pthread_create(&tid, NULL, thread, connfdp);
         }
     }
+    lru_cache_free(&lru_cache);
     return 0;
 }

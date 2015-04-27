@@ -1,6 +1,7 @@
 #include "util.h"
-#include "dstring.h"
+#include "bytes.h"
 #include "csapp.h"
+#include "cache.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -18,38 +19,38 @@
 
 void test_dstring1()
 {
-    string str;
-    string_malloc(&str);
-    string_append(&str, "abc");
-    CHECK_EQUAL(string_length(str), 3);
-    string_free(&str);
+    Bytes str;
+    bytes_malloc(&str);
+    bytes_append(&str, "abc");
+    CHECK_EQUAL(bytes_length(str), 3);
+    bytes_free(&str);
 }
 
 void test_dstring2()
 {
-    string str;
-    string_malloc(&str);
+    Bytes str;
+    bytes_malloc(&str);
     char fake[2];
     fake[1] = '\0';
     for (char c = 'a'; c <= 'z'; c+=1) {
         for (int i = 0; i < 1024; i++) {
             fake[0] = c;
-            string_append(&str, fake);
+            bytes_append(&str, fake);
         }
     }
-    CHECK_EQUAL(string_length(str), 26*1024);
-    CHECK_EQUAL(string_size(str), 32*1024);
-    CHECK_EQUAL(string_ref(str, string_length(str)),
+    CHECK_EQUAL(bytes_length(str), 26*1024);
+    CHECK_EQUAL(bytes_size(str), 32*1024);
+    CHECK_EQUAL(bytes_ref(str, bytes_length(str)),
             '\0');
     for (char c = 'a'; c <= 'z'; c+=1) {
         for (int i = 0; i < 1024; i++) {
             int idx = (c-'a');
             idx *= 1024;
             idx += i;
-            CHECK_EQUAL(string_ref(str, idx), c);
+            CHECK_EQUAL(bytes_ref(str, idx), c);
         }
     }
-    string_free(&str);
+    bytes_free(&str);
 }
 
 void test_parse_uri()
@@ -71,10 +72,44 @@ void test_parse_uri()
     CHECK_STREQUAL(dir, "/hub/index.html");
 }
 
+void print_cache(lru_cache_t *pcache)
+{
+    for (lru_cache_node_t *p = pcache->sentinel->next;
+            p != pcache->sentinel; p=p->next) {
+        printf("%c ", p->value[0]);
+    }
+    printf("\n");
+    fflush(stdin);
+}
+
+void test_cache()
+{
+    lru_cache_t cache;
+    lru_cache_init(&cache, 16);
+    
+    char str[2];
+    for (char c = 'a'; c < 'a'+16; c += 1) {
+        str[0] = c;
+        str[1] = '\0';
+        lru_cache_insert(&cache, str, str, 1);
+    }
+    print_cache(&cache);
+    // printf("%zu\n", cache.cache_size);
+    CHECK_EQUAL(cache.cache_size, 16);
+    str[0] = 'a' + 16;
+    lru_cache_insert(&cache, str, str, 1);
+    CHECK_EQUAL(cache.cache_size, 16);
+    CHECK_EQUAL(cache.sentinel->next->value[0],
+            'a'+16);
+    print_cache(&cache);
+    lru_cache_free(&cache);
+}
+
 int main()
 {
     test_parse_uri();
     test_dstring1();
     test_dstring2();
+    test_cache();
     return 0;
 }

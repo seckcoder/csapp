@@ -47,6 +47,13 @@ size_t copy_until(const char *src, size_t cur, const char *terminators,
     return cur;
 }
 
+void tolowercstr(char *cstr)
+{
+    for (int i = 0; cstr[i] != '\0'; i+=1) {
+        cstr[i] = tolower(cstr[i]);
+    }
+}
+
 void parse_uri(const char *uri, char *host, char *port, char *dir)
 {
     size_t cur = 0;
@@ -61,6 +68,7 @@ void parse_uri(const char *uri, char *host, char *port, char *dir)
     }
     
     copy_until(uri, cur, "", dir);
+    tolowercstr(host);
 }
 void parse_header(const char *line, char *name, char *value)
 {
