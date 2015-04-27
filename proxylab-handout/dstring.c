@@ -1,5 +1,4 @@
 #include "dstring.h"
-#include <math.h>
 #include <string.h>
 
 #define DEFAULT_LENGTH 1024
@@ -24,7 +23,9 @@ void string_free(string *pstr)
  */
 inline static size_t ceil_divide(size_t a, size_t b)
 {
-    return (size_t)(ceil((float)a / (float) b));
+    size_t m = 2;
+    for (m = 2; m * b < a; m+=1) {}
+    return m;
 }
 
 /* string_append : append cstr to the end of pstr.
