@@ -42,7 +42,8 @@ void string_append(string *pstr, const char *cstr)
 void string_appendn(string *pstr, const char *cstr, size_t cstr_len)
 {
     if (pstr->len + cstr_len + 1 <= pstr->size) {
-        for (int i = 0; i < cstr_len; i++) {
+        int i;
+        for (i = 0; i < cstr_len; i++) {
             pstr->cstr[pstr->len+i] = cstr[i];
         }
         pstr->len += cstr_len;
@@ -51,10 +52,11 @@ void string_appendn(string *pstr, const char *cstr, size_t cstr_len)
                 pstr->size);
         size_t new_size = multipler * pstr->size;
         char *new_str = (char *)malloc(new_size*sizeof(char));
-        for (int i = 0; i < pstr->len; i++) {
+        int i;
+        for (i = 0; i < pstr->len; i++) {
             new_str[i] = pstr->cstr[i];
         }
-        for (int i = 0; i < cstr_len; i++) {
+        for (i = 0; i < cstr_len; i++) {
             new_str[pstr->len+i] = cstr[i];
         }
         pstr->len += cstr_len;
