@@ -77,10 +77,10 @@ void forward_response(int infd, int outfd)
         fprintf(stderr, "Content-length: %d\n", content_length);
 #endif
         // read content
-        char *content_buf = (char *)malloc((content_length+1)*sizeof(char));
+        char *content_buf = (char *)Malloc((content_length+1)*sizeof(char));
         Rio_readnb(&rio, content_buf, content_length);
         string_appendn(&response, content_buf, (size_t)content_length);
-        free(content_buf);
+        Free(content_buf);
     }
     if (Rio_readlineb(&rio, buf, MAXLINE) != 0) {
         // TODO: error handling
@@ -125,8 +125,6 @@ void forward(int fromfd)
 #endif
     
     sprintf(request_buf, "%s %s %s\r\n", method, dir, version);
-    int clientfd = Open_clientfd(
-            host, port);
     
     int has_host = 0;
     // request headers
@@ -166,12 +164,25 @@ void forward(int fromfd)
 #ifdef DEBUG
     fprintf(stderr, "request buf:\n%s\n", request_buf);
 #endif
+    int clientfd = Open_clientfd(
+            host, port);
     Rio_writen(clientfd, request_buf, strlen(request_buf));
     
     // receive data
     // read_response(clientfd);
     
     forward_response(clientfd, fromfd);
+    Close(clientfd);
+}
+
+void *thread(void *vargp)
+{
+    int connfd = *((int*)vargp);
+    Pthread_detach(pthread_self());
+    Free(vargp);
+    forward(connfd);
+    Close(connfd);
+    return NULL;
 }
 
 
@@ -186,14 +197,20 @@ int main(int argc, char **argv)
     int listenfd = Open_listenfd(argv[1]);
     struct sockaddr_storage clientaddr;
     socklen_t clientlen = sizeof(clientaddr);
+    int *connfdp;
     while (1) {
-        int connfd = Accept(listenfd,
+        connfdp = Malloc(sizeof(int));
+        *connfdp = Accept(listenfd,
                 (SA *)&clientaddr,
                 &clientlen);
-        if (connfd == -1) {
+        if (*connfdp == -1) {
+            Free(connfdp);
             // TODO: error report
+        } else {
+            // TODO: use thread pool
+            pthread_t tid;
+            Pthread_create(&tid, NULL, thread, connfdp);
         }
-        forward(connfd);
     }
     return 0;
 }
