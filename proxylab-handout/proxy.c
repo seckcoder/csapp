@@ -49,6 +49,7 @@ void forward_response(int infd, int outfd)
     string_malloc(&response);
 
     while (Rio_readlineb(&rio, buf, MAXLINE)) {
+        // printf("%s\n", buf);
         string_append(&response, buf);
     }
 #ifdef DEBUG

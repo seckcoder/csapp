@@ -6,11 +6,14 @@
 #include <string.h>
 
 #define CHECK_STREQUAL(s1, s2) if (strcmp((s1), (s2))) { \
-    fprintf(stderr, "[CHECK_STREQUAL] %s != %s\n", s1, s2); \
+    fprintf(stderr, "%d [CHECK_STREQUAL] %s != %s\n", __LINE__, s1, s2); \
+    exit(-1);\
 }
 
-#define CHECK_EQUAL(a, b) if ((a) == (b)) {\
-    fprintf(stderr, "[CHECK_EQUAL] failed"); \
+#define CHECK_EQUAL(a, b) if (!((a) == (b))) {\
+    fprintf(stderr, "%d [CHECK_EQUAL] failed", __LINE__); \
+    fflush(stderr);\
+    exit(-1);\
 }
 
 void test_dstring1()
@@ -26,18 +29,26 @@ void test_dstring2()
 {
     string str;
     string_malloc(&str);
-    for (int i = 0; i < 1024; i++) {
-        string_append(&str, "a");
+    char fake[2];
+    fake[1] = '\0';
+    for (char c = 'a'; c <= 'z'; c+=1) {
+        for (int i = 0; i < 1024; i++) {
+            fake[0] = c;
+            string_append(&str, fake);
+        }
     }
-    string_append(&str, "b");
-    CHECK_EQUAL(string_length(str), 1025);
-    CHECK_EQUAL(string_size(str), 2048);
+    CHECK_EQUAL(string_length(str), 26*1024);
+    CHECK_EQUAL(string_size(str), 32*1024);
     CHECK_EQUAL(string_ref(str, string_length(str)),
             '\0');
-    for (int i = 0; i < 1024; i++) {
-        CHECK_EQUAL(string_ref(str, i), 'a');
+    for (char c = 'a'; c <= 'z'; c+=1) {
+        for (int i = 0; i < 1024; i++) {
+            int idx = (c-'a');
+            idx *= 1024;
+            idx += i;
+            CHECK_EQUAL(string_ref(str, idx), c);
+        }
     }
-    CHECK_EQUAL(string_ref(str, string_length(str)-1), 'b');
     string_free(&str);
 }
 
