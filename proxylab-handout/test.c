@@ -31,9 +31,11 @@ void test_dstring2()
     Bytes str;
     bytes_malloc(&str);
     char fake[2];
+    char c;
+    int i;
     fake[1] = '\0';
-    for (char c = 'a'; c <= 'z'; c+=1) {
-        for (int i = 0; i < 1024; i++) {
+    for (c = 'a'; c <= 'z'; c+=1) {
+        for (i = 0; i < 1024; i++) {
             fake[0] = c;
             bytes_append(&str, fake);
         }
@@ -42,8 +44,8 @@ void test_dstring2()
     CHECK_EQUAL(bytes_size(str), 32*1024);
     CHECK_EQUAL(bytes_ref(str, bytes_length(str)),
             '\0');
-    for (char c = 'a'; c <= 'z'; c+=1) {
-        for (int i = 0; i < 1024; i++) {
+    for (c = 'a'; c <= 'z'; c+=1) {
+        for (i = 0; i < 1024; i++) {
             int idx = (c-'a');
             idx *= 1024;
             idx += i;
@@ -74,7 +76,8 @@ void test_parse_uri()
 
 void print_cache(lru_cache_t *pcache)
 {
-    for (lru_cache_node_t *p = pcache->sentinel->next;
+    lru_cache_node_t *p;
+    for (p = pcache->sentinel->next;
             p != pcache->sentinel; p=p->next) {
         printf("%c ", p->value[0]);
     }
@@ -88,19 +91,25 @@ void test_cache()
     lru_cache_init(&cache, 16);
     
     char str[2];
-    for (char c = 'a'; c < 'a'+16; c += 1) {
+    char c;
+    for (c = 'a'; c < 'a'+16; c += 1) {
         str[0] = c;
         str[1] = '\0';
         lru_cache_insert(&cache, str, str, 1);
+        CHECK_EQUAL(cache.cache_size, c-'a'+1);
+        CHECK_EQUAL(cache.sentinel->next->value[0],
+            str[0]);
     }
     print_cache(&cache);
     // printf("%zu\n", cache.cache_size);
     CHECK_EQUAL(cache.cache_size, 16);
-    str[0] = 'a' + 16;
-    lru_cache_insert(&cache, str, str, 1);
-    CHECK_EQUAL(cache.cache_size, 16);
-    CHECK_EQUAL(cache.sentinel->next->value[0],
-            'a'+16);
+    for (c = 'a'+16; c < 'a'+26; c+=1) {
+      str[0] = c;
+      lru_cache_insert(&cache, str, str, 1);
+      CHECK_EQUAL(cache.cache_size, 16);
+      CHECK_EQUAL(cache.sentinel->next->value[0],
+          str[0]);
+    }
     print_cache(&cache);
     lru_cache_free(&cache);
 }

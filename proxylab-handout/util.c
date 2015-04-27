@@ -49,7 +49,8 @@ size_t copy_until(const char *src, size_t cur, const char *terminators,
 
 void tolowercstr(char *cstr)
 {
-    for (int i = 0; cstr[i] != '\0'; i+=1) {
+    int i;
+    for (i = 0; cstr[i] != '\0'; i+=1) {
         cstr[i] = tolower(cstr[i]);
     }
 }

@@ -27,7 +27,8 @@ static lru_cache_node_t *create_node_from(
     pnode->value = (char *)malloc(value_len*sizeof(char));
     pnode->value_len = value_len;
     strcpy(pnode->key, key);
-    for (int i = 0; i < value_len; i++) {
+    int i;
+    for (i = 0; i < value_len; i++) {
         pnode->value[i] = value[i];
     }
     return pnode;
@@ -86,7 +87,8 @@ static void lru_cache_raise(lru_cache_t *pcache, lru_cache_node_t *cur)
 
 lru_cache_node_t *lru_cache_find(lru_cache_t *pcache, const char *key)
 {
-    for (lru_cache_node_t *cur = pcache->sentinel->next;
+    lru_cache_node_t *cur;
+    for (cur = pcache->sentinel->next;
             cur != pcache->sentinel; cur = cur->next) {
         if (strcasecmp(cur->key, key) == 0) {
             lru_cache_raise(pcache, cur);

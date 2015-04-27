@@ -67,7 +67,8 @@ void bytes_appendn(Bytes *pstr, const char *buf, size_t buf_len)
 /* return bytes as a cstr */
 void bytes_cstr(Bytes str, char *cstr)
 {
-    for (int i = 0; i < str.len; i++) {
+    int i;
+    for (i = 0; i < str.len; i++) {
         cstr[i] = str.buf[i];
     }
     cstr[str.len] = '\0';
