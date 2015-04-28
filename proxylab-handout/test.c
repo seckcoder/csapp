@@ -1,3 +1,6 @@
+/*
+ * test.c  -- simple test
+ */
 #include "util.h"
 #include "bytes.h"
 #include "csapp.h"
@@ -6,27 +9,40 @@
 #include <stdio.h>
 #include <string.h>
 
+/* simple check */
+
+/* check whether two strings are equal */
 #define CHECK_STREQUAL(s1, s2) if (strcmp((s1), (s2))) { \
     fprintf(stderr, "%d [CHECK_STREQUAL] %s != %s\n", __LINE__, s1, s2); \
     exit(-1);\
 }
 
+
+/* check whether two scalar values(int,char,float,...) are equal */
 #define CHECK_EQUAL(a, b) if (!((a) == (b))) {\
     fprintf(stderr, "%d [CHECK_EQUAL] failed", __LINE__); \
     fflush(stderr);\
     exit(-1);\
 }
 
-void test_dstring1()
+/* test_bytes_append  -- test append a cstr to the bytes */
+void test_bytes_append()
 {
     Bytes str;
     bytes_malloc(&str);
     bytes_append(&str, "abc");
     CHECK_EQUAL(bytes_length(str), 3);
+    char cstr[4];
+    bytes_cstr(str, cstr);
+    CHECK_STREQUAL(cstr, "abc");
     bytes_free(&str);
 }
 
-void test_dstring2()
+/* test_bytes_resizing  -- when the size of the bytes content exceeds
+ * the allocated memory, we dynamically reallocate a block of memory
+ * to fit the bytes
+ */
+void test_bytes_resizing()
 {
     Bytes str;
     bytes_malloc(&str);
@@ -55,6 +71,7 @@ void test_dstring2()
     bytes_free(&str);
 }
 
+/* test_parse_uri  -- test parse_uri basic functionality */
 void test_parse_uri()
 {
     char host[MAXLINE];
@@ -74,6 +91,7 @@ void test_parse_uri()
     CHECK_STREQUAL(dir, "/hub/index.html");
 }
 
+/* print_cache  -- print the content of the cache */
 void print_cache(lru_cache_t *pcache)
 {
     lru_cache_node_t *p;
@@ -85,6 +103,7 @@ void print_cache(lru_cache_t *pcache)
     fflush(stdin);
 }
 
+/* test_cache  -- test basic lru_cache functionality */
 void test_cache()
 {
     lru_cache_t cache;
@@ -117,8 +136,8 @@ void test_cache()
 int main()
 {
     test_parse_uri();
-    test_dstring1();
-    test_dstring2();
+    test_bytes_append();
+    test_bytes_resizing();
     test_cache();
     return 0;
 }
