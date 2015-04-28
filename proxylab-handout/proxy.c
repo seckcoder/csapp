@@ -39,60 +39,13 @@ void forward_response(const char *key, int infd, int outfd)
     struct Bytes response;
     bytes_malloc(&response);
 
-    if (!rio_readlineb_ww(&rio, buf, MAXLINE)) {
-        // goto is used here to makes sure that
-        // the bytes are freed.
-        goto FORWARD_RESPONSE_RETURN;
-    }
-
-    bytes_append(&response, buf);
-
-    if (!rio_readlineb_ww(&rio, buf, MAXLINE)) {
-        goto FORWARD_RESPONSE_RETURN;
-    }
-    char header_name[MAXLINE], header_value[MAXLINE];
-    int content_length = 0;
-    while (strcmp(buf, "\r\n")) {
-        parse_header(buf, header_name, header_value);
-        if (strcasecmp(header_name, "Content-length") == 0) {
-            content_length = atoi(header_value);
-        }
-        bytes_append(&response, buf);
-        if (!rio_readlineb_ww(&rio, buf, MAXLINE) < 0) {
-            goto FORWARD_RESPONSE_RETURN;
-        }
-    }
-    bytes_append(&response, buf);
-
     int num_bytes;
     while ((num_bytes=rio_readnb_ww(&rio, buf, MAXLINE)) > 0) {
         bytes_appendn(&response, buf, num_bytes);
     }
-
-#if 0
-    if (content_length == 0) {
-
-    } else {
-#ifdef DEBUG
-        fprintf(stderr, "Content-length: %d\n", content_length);
-#endif
-        // read content
-        char *content_buf = (char *)malloc((content_length+1)*sizeof(char));
-        if (content_buf == NULL) {
-            fprintf(stderr, "malloc failed\n");
-            goto FORWARD_RESPONSE_RETURN;
-        }
-        if (!rio_readnb_ww(&rio, content_buf, content_length)) {
-            goto FORWARD_RESPONSE_RETURN;
-        }
-        bytes_appendn(&response, content_buf, (size_t)content_length);
-        free(content_buf);
+    if (num_bytes < 0) {
+        return ;
     }
-#endif
-    if (rio_readlineb_ww(&rio, buf, MAXLINE) != 0) {
-        goto FORWARD_RESPONSE_RETURN;
-    }
-    
 
 #ifdef DEBUG
     fprintf(stderr, "response length: %zu\n", bytes_length(response));
