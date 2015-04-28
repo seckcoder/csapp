@@ -102,6 +102,7 @@ FORWARD_RESPONSE_RETURN:
     bytes_free(&response);
 }
 
+
 /* forward  -- forward the request to remote server and the response from
  * remote server
  */
@@ -211,6 +212,8 @@ void forward(int fromfd)
 #endif
     int clientfd = open_clientfd_ww(host, port);
     if (clientfd < 0) {
+        // TODO: is it ok to directly return?
+        // Maybe better error handling expected.
         return ;
     }
     if (rio_writen_ww(clientfd, request_buf, strlen(request_buf)) < 0) {
@@ -222,6 +225,7 @@ void forward(int fromfd)
     forward_response(formated_uri, clientfd, fromfd);
     close_ww(clientfd);
 }
+
 
 /* thread  -- the things to do for each thread */
 void *thread(void *vargp)

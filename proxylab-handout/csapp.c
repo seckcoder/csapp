@@ -981,7 +981,15 @@ int open_clientfd(char *hostname, char *port) {
     hints.ai_socktype = SOCK_STREAM;  /* Open a connection */
     hints.ai_flags = AI_NUMERICSERV;  /* ... using a numeric port arg. */
     hints.ai_flags |= AI_ADDRCONFIG;  /* Recommended for connections */
-    Getaddrinfo(hostname, port, &hints, &listp);
+    
+    /* fixed by weili.
+     * To avoid crashing the server, we don't report an error directly
+     */
+    if (getaddrinfo(hostname, port, &hints, &listp) != 0) {
+        fprintf(stderr, "Could not resolve host: %s\n", hostname);
+        return -1;
+    }
+    // Getaddrinfo(hostname, port, &hints, &listp);
   
     /* Walk the list for one that we can successfully connect to */
     for (p = listp; p; p = p->ai_next) {
