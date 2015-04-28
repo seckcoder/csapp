@@ -30,37 +30,27 @@ void usage()
 }
 
 
-void read_response(int infd)
-{
-    rio_t rio;
-    Rio_readinitb(&rio, infd);
-
-    char buf[MAXLINE];
-
-    while (Rio_readlineb(&rio, buf, MAXLINE)) {
-        // TODO: empty return
-
-        printf("%s", buf);
-    }
-}
 
 void forward_response(const char *key, int infd, int outfd)
 {
     rio_t rio;
-    Rio_readinitb(&rio, infd);
+    rio_readinitb(&rio, infd);
 
     char buf[MAXLINE];
     struct Bytes response;
     bytes_malloc(&response);
 
-    if (!Rio_readlineb(&rio, buf, MAXLINE)) {
-        //TODO: error report
-        return;
+    if (!rio_readlineb_ww(&rio, buf, MAXLINE)) {
+        // goto is used here to makes sure that
+        // the bytes are freed.
+        goto FORWARD_RESPONSE_RETURN;
     }
 
     bytes_append(&response, buf);
 
-    Rio_readlineb(&rio, buf, MAXLINE);
+    if (!rio_readlineb_ww(&rio, buf, MAXLINE)) {
+        goto FORWARD_RESPONSE_RETURN;
+    }
     char header_name[MAXLINE], header_value[MAXLINE];
     int content_length = 0;
     while (strcmp(buf, "\r\n")) {
@@ -69,26 +59,34 @@ void forward_response(const char *key, int infd, int outfd)
             content_length = atoi(header_value);
         }
         bytes_append(&response, buf);
-        Rio_readlineb(&rio, buf, MAXLINE);
+        if (!rio_readlineb_ww(&rio, buf, MAXLINE) < 0) {
+            goto FORWARD_RESPONSE_RETURN;
+        }
     }
     bytes_append(&response, buf);
 
     if (content_length == 0) {
         // TODO: error handling
-        return;
+        fprintf(stderr, "Content-length is 0\n");
+        goto FORWARD_RESPONSE_RETURN;
     } else {
 #ifdef DEBUG
         fprintf(stderr, "Content-length: %d\n", content_length);
 #endif
         // read content
-        char *content_buf = (char *)Malloc((content_length+1)*sizeof(char));
-        Rio_readnb(&rio, content_buf, content_length);
+        char *content_buf = (char *)malloc((content_length+1)*sizeof(char));
+        if (content_buf == NULL) {
+            fprintf(stderr, "malloc failed\n");
+            goto FORWARD_RESPONSE_RETURN;
+        }
+        if (!rio_readnb_ww(&rio, content_buf, content_length)) {
+            goto FORWARD_RESPONSE_RETURN;
+        }
         bytes_appendn(&response, content_buf, (size_t)content_length);
-        Free(content_buf);
+        free(content_buf);
     }
-    if (Rio_readlineb(&rio, buf, MAXLINE) != 0) {
-        // TODO: error handling
-        return;
+    if (rio_readlineb_ww(&rio, buf, MAXLINE) != 0) {
+        goto FORWARD_RESPONSE_RETURN;
     }
     
 
@@ -97,23 +95,26 @@ void forward_response(const char *key, int infd, int outfd)
     // fprintf(stderr, "response:\n%s", string_cstr(response));
 #endif
     
-    Rio_writen(outfd,
-            bytes_buf(response),
-            bytes_length(response));
+    if (!rio_writen_ww(outfd,
+                bytes_buf(response),
+                bytes_length(response))) {
+        goto FORWARD_RESPONSE_RETURN;
+    }
 
     if (bytes_length(response) < MAX_OBJECT_SIZE) {
-        P(&mutex);
+        sem_wait(&mutex);
         lru_cache_insert(&lru_cache, key, bytes_buf(response),
                 bytes_length(response));
-        V(&mutex);
+        sem_post(&mutex);
     }
+FORWARD_RESPONSE_RETURN:
     bytes_free(&response);
 }
 
 void forward(int fromfd)
 {
     rio_t rio;
-    Rio_readinitb(&rio, fromfd);
+    rio_readinitb(&rio, fromfd);
     char linebuf[MAXLINE], method[MAXLINE], uri[MAXLINE],
          version[MAXLINE], host[MAXLINE],
          port[MAXLINE], dir[MAXLINE],
@@ -121,12 +122,13 @@ void forward(int fromfd)
          header_name[MAXLINE],
          header_value[MAXLINE];
 
-    if (!Rio_readlineb(&rio, linebuf, MAXLINE)) {
+    if (!rio_readlineb_ww(&rio, linebuf, MAXLINE)) {
         return;
     }
     sscanf(linebuf, "%s %s %s", method, uri, version);
-    if (strcasecmp(method, "GET")) {
+    if (strcasecmp(method, "GET") != 0) {
         // TODO
+        fprintf(stderr, "[ERROR] method is not GET\n");
         return;
     }
     parse_uri(uri, host, port, dir);
@@ -136,22 +138,24 @@ void forward(int fromfd)
 
     char formated_uri[MAXLINE];
     sprintf(formated_uri, "%s:%s%s", host, port, dir);
-    P(&mutex);
+    sem_wait(&mutex);
     lru_cache_node_t *pnode = lru_cache_find(&lru_cache, formated_uri);
 
     if (pnode) {
-        Rio_writen(fromfd, pnode->value, pnode->value_len);
-        V(&mutex);
+        rio_writen_ww(fromfd, pnode->value, pnode->value_len);
+        sem_post(&mutex);
         return;
     }
-    V(&mutex);
+    sem_post(&mutex);
     
     sprintf(request_buf, "%s %s %s\r\n", method, dir, version);
     
     int has_host = 0;
     // request headers
-    Rio_readlineb(&rio, linebuf, MAXLINE);
-    while (strcmp(linebuf, "\r\n")) {
+    if (rio_readlineb_ww(&rio, linebuf, MAXLINE) < 0) {
+        return;
+    }
+    while (strcmp(linebuf, "\r\n") != 0) {
         parse_header(linebuf, header_name, header_value);
         // printf("header %s : %s\n", header_name, header_value);
         if (strcasecmp(header_name, "Host") == 0) {
@@ -166,7 +170,9 @@ void forward(int fromfd)
         } else {
             sprintf(request_buf, "%s%s", request_buf, linebuf);
         }
-        Rio_readlineb(&rio, linebuf, MAXLINE);
+        if (rio_readlineb_ww(&rio, linebuf, MAXLINE) < 0) {
+            return;
+        }
     }
     if (!has_host) {
         sprintf(request_buf, "%s%s: %s:%s\r\n", request_buf, "Host",
@@ -186,53 +192,67 @@ void forward(int fromfd)
 #ifdef DEBUG
     fprintf(stderr, "request buf:\n%s\n", request_buf);
 #endif
-    int clientfd = Open_clientfd(host, port);
-    Rio_writen(clientfd, request_buf, strlen(request_buf));
+    int clientfd = open_clientfd_ww(host, port);
+    if (clientfd < 0) {
+        return ;
+    }
+    if (rio_writen_ww(clientfd, request_buf, strlen(request_buf)) < 0) {
+        close_ww(clientfd);
+        return;
+    }
     
     // receive data
     // read_response(clientfd);
     
     forward_response(formated_uri, clientfd, fromfd);
-    Close(clientfd);
+    close_ww(clientfd);
 }
 
 void *thread(void *vargp)
 {
     int connfd = *((int*)vargp);
-    Pthread_detach(pthread_self());
-    Free(vargp);
+    pthread_detach(pthread_self());
+    free(vargp);
     forward(connfd);
-    Close(connfd);
+    close(connfd);
     return NULL;
 }
 
 
+void sigpipe_handler(int sig)
+{
+    fprintf(stderr, "[WARNING] Catch a sigpipe signal\n");
+}
+
 
 int main(int argc, char **argv)
 {
-    // printf("%s%s%s", user_agent_hdr, accept_hdr, accept_encoding_hdr);
-
     if (argc != 2) {
         usage();
     }
+    Signal(SIGPIPE, sigpipe_handler);
     int listenfd = Open_listenfd(argv[1]);
     struct sockaddr_storage clientaddr;
     socklen_t clientlen = sizeof(clientaddr);
     int *connfdp;
     lru_cache_init(&lru_cache, MAX_CACHE_SIZE);
-    Sem_init(&mutex, 0, 1);
+    sem_init(&mutex, 0, 1);
     while (1) {
-        connfdp = Malloc(sizeof(int));
+        connfdp = malloc(sizeof(int));
+        if (connfdp == NULL) {
+            fprintf(stderr, "malloc failed\n");
+            continue;
+        }
         *connfdp = Accept(listenfd,
                 (SA *)&clientaddr,
                 &clientlen);
         if (*connfdp == -1) {
-            Free(connfdp);
+            free(connfdp);
             // TODO: error report
         } else {
             // TODO: use thread pool
             pthread_t tid;
-            Pthread_create(&tid, NULL, thread, connfdp);
+            pthread_create(&tid, NULL, thread, connfdp);
         }
     }
     lru_cache_free(&lru_cache);

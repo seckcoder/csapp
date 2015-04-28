@@ -920,6 +920,47 @@ ssize_t Rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
     return rc;
 } 
 
+
+ssize_t rio_readn_ww(int fd, void *usrbuf, size_t n)
+{
+    ssize_t rc;
+    if ((rc = rio_readn(fd, usrbuf, n)) < 0) {
+        fprintf(stderr, "[ERROR] read from %d failed\n",
+                fd);
+    }
+    return rc;
+}
+
+ssize_t rio_writen_ww(int fd, void *usrbuf, size_t n)
+{
+    ssize_t rc;
+    if ((rc = rio_writen(fd, usrbuf, n)) < 0) {
+        fprintf(stderr, "[ERROR] write to %d failed\n",
+                fd);
+    }
+    return rc;
+}
+
+ssize_t rio_readnb_ww(rio_t *rp, void *usrbuf, size_t n)
+{
+    ssize_t rc;
+    if ((rc = rio_readnb(rp, usrbuf, n)) < 0) {
+        fprintf(stderr, "[ERROR] read from %d failed\n",
+                rp->rio_fd);
+    }
+    return rc;
+}
+
+ssize_t rio_readlineb_ww(rio_t *rp, void *usrbuf, size_t maxlen)
+{
+    ssize_t rc;
+    if ((rc = rio_readlineb(rp, usrbuf, maxlen)) < 0) {
+        fprintf(stderr, "[ERROR] read from %d failed\n",
+                rp->rio_fd);
+    }
+    return rc;
+}
+
 /******************************** 
  * Client/server helper functions
  ********************************/
@@ -1032,6 +1073,36 @@ int Open_listenfd(char *port)
 	unix_error("Open_listenfd error");
     return rc;
 }
+
+int open_clientfd_ww(char *hostname, char *port)
+{
+    int rc;
+    if ((rc = open_clientfd(hostname, port)) < 0) {
+        fprintf(stderr, "[ERROR] open %s:%s failed\n",
+                hostname, port);
+    }
+    return rc;
+}
+
+int open_listenfd_ww(char *port)
+{
+    int rc;
+
+    if ((rc = open_listenfd(port)) < 0) {
+        fprintf(stderr, "[ERROR] listen on %s failed\n",
+                port);
+    }
+    return rc;
+}
+
+void close_ww(int fd)
+{
+    if (close(fd) < 0) {
+        fprintf(stderr, "[ERROR] %d is closed failed\n",
+                fd);
+    }
+}
+
 
 /* $end csapp.c */
 
