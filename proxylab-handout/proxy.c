@@ -240,9 +240,7 @@ void *thread(void *vargp)
  * */
 void sigpipe_handler(int sig)
 {
-#ifdef DEBUG
     fprintf(stderr, "[WARNING] Catch a sigpipe signal\n");
-#endif
 }
 
 
