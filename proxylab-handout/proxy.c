@@ -64,10 +64,14 @@ void forward_response(const char *key, int infd, int outfd)
     }
     bytes_append(&response, buf);
 
+    int num_bytes;
+    while ((num_bytes=rio_readnb_ww(&rio, buf, MAXLINE)) > 0) {
+        bytes_appendn(&response, buf, num_bytes);
+    }
+
+#if 0
     if (content_length == 0) {
-        // TODO: error handling
-        fprintf(stderr, "Content-length is 0\n");
-        goto FORWARD_RESPONSE_RETURN;
+
     } else {
 #ifdef DEBUG
         fprintf(stderr, "Content-length: %d\n", content_length);
@@ -84,6 +88,7 @@ void forward_response(const char *key, int infd, int outfd)
         bytes_appendn(&response, content_buf, (size_t)content_length);
         free(content_buf);
     }
+#endif
     if (rio_readlineb_ww(&rio, buf, MAXLINE) != 0) {
         goto FORWARD_RESPONSE_RETURN;
     }
