@@ -6,8 +6,7 @@
 #include "bytes.h"
 #include "cache.h"
 
-// #define DEBUG
-#undef DEBUG
+#define DEBUG
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
@@ -91,8 +90,7 @@ void forward_response(const char *key, int infd, int outfd)
     
 
 #ifdef DEBUG
-    fprintf(stderr, "response length: %zu\n", string_length(response));
-    // fprintf(stderr, "response:\n%s", string_cstr(response));
+    fprintf(stderr, "response length: %zu\n", bytes_length(response));
 #endif
     
     if (!rio_writen_ww(outfd,
@@ -133,6 +131,7 @@ void forward(int fromfd)
     }
     parse_uri(uri, host, port, dir);
 #ifdef DEBUG
+    fprintf(stderr, "uri: %s\n", uri);
     fprintf(stderr, "host: %s port: %s dir: %s\n", host, port, dir);
 #endif
 
@@ -152,6 +151,7 @@ void forward(int fromfd)
      * forwarded as HTTP/1.0
      */
     sprintf(request_buf, "%s %s %s\r\n", method, dir, "HTTP/1.0");
+    // sprintf(request_buf, "%s %s %s\r\n", method, dir, version);
     
     int has_host = 0;
     // request headers
@@ -160,7 +160,6 @@ void forward(int fromfd)
     }
     while (strcmp(linebuf, "\r\n") != 0) {
         parse_header(linebuf, header_name, header_value);
-        // printf("header %s : %s\n", header_name, header_value);
         if (strcasecmp(header_name, "Host") == 0) {
             has_host = 1;
             sprintf(request_buf, "%s%s", request_buf, linebuf);
@@ -246,12 +245,15 @@ int main(int argc, char **argv)
             fprintf(stderr, "malloc failed\n");
             continue;
         }
-        *connfdp = Accept(listenfd,
+#ifdef DEBUG
+        fprintf(stderr, "accepting...\n");
+#endif
+        *connfdp = accept(listenfd,
                 (SA *)&clientaddr,
                 &clientlen);
         if (*connfdp == -1) {
+            fprintf(stderr, "Accept failed: %d\n", listenfd);
             free(connfdp);
-            // TODO: error report
         } else {
             // TODO: use thread pool
             pthread_t tid;
