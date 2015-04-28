@@ -148,7 +148,10 @@ void forward(int fromfd)
     }
     sem_post(&mutex);
     
-    sprintf(request_buf, "%s %s %s\r\n", method, dir, version);
+    /* According to the requirement, all requests are
+     * forwarded as HTTP/1.0
+     */
+    sprintf(request_buf, "%s %s %s\r\n", method, dir, "HTTP/1.0");
     
     int has_host = 0;
     // request headers
