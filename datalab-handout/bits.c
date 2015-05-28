@@ -150,7 +150,7 @@ int bitAnd(int x, int y) {
  *   Rating: 1
  */
 int tmin(void) {
-  return (~0)<<31;
+  return 1<<31;
 }
 /* 
  * negate - return -x 
